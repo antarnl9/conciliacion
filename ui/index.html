@@ -459,7 +459,10 @@ views.costos=async function(){
 window.onCostCarrier=function(){ COSTC=$('#cost-carrier').value; COSTSVC=''; loadCostos(); };
 function svcNombre(code){ const s=COSTSVCS.find(x=>x.codigo===code); return s?s.nombre:code; }
 function renderSvcTabs(){
-  const tabs=COSTSVCS.map((s,i)=>`<button class="seg-tab ${s.codigo===COSTSVC?'active':''}" onclick="selSvc(${i})" title="En el Acre: ${s.codigo}">${s.nombre}</button>`).join('');
+  const tabs=COSTSVCS.map((s,i)=>{
+    const lbl=(s.codigo&&s.codigo!==s.nombre)?`${s.nombre} (${s.codigo})`:s.nombre;
+    return `<button class="seg-tab ${s.codigo===COSTSVC?'active':''}" onclick="selSvc(${i})" title="En el Acre: ${s.codigo}">${lbl}</button>`;
+  }).join('');
   $('#svc-tabs').innerHTML=tabs+`<button class="btn-secondary btn-sm" onclick="addSvc()">+ servicio</button>`;
 }
 window.selSvc=async function(i){ COSTSVC=COSTSVCS[i].codigo; renderSvcTabs(); await loadCostoSvc(); };
