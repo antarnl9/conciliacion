@@ -93,7 +93,9 @@ IVA_DEFAULT = 0.16
 CONFIG_PREPAGO = "Prepago"               # cobra al día con saldo; ingreso = sale_price + sobrepeso
 CONFIG_CREDITO = "Prepago sin saldo"     # cobra por Acre con rezago; ingreso = factura real subida
 
-# Mapeo de carrier del archivo -> carrier_name en ClickHouse
+# Mapeo de carrier del archivo -> carrier_name en ClickHouse (fct_shipments)
 CARRIER_CH = {
     "dhl": "DHL",
+    "fedex": "FEDEX",
+    "paquete_express": "PAQUETERIA EXPRESS",
 }

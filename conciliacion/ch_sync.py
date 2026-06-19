@@ -10,9 +10,10 @@ def _client():
     return clickhouse_connect.get_client(**config.ch_settings())
 
 
-def sync_shipments(con, carrier: str = "dhl", desde: str = "2025-09-01") -> int:
-    """Trae una fila por guía (dedup argMax) del carrier indicado a ch_shipments."""
-    carrier_ch = config.CARRIER_CH[carrier]
+def sync_shipments(con, carrier: str | None = None, desde: str = "2025-09-01") -> int:
+    """Trae una fila por guía (dedup argMax) de TODAS las paqueterías soportadas a ch_shipments.
+    El cruce en reconcile es por número de guía; FedEx usa 'Guia', Paquete Express usa 'Rastreo'."""
+    carriers = list(config.CARRIER_CH.values())  # DHL, FEDEX, PAQUETERIA EXPRESS
     cli = _client()
     q = f"""
         SELECT shipment_number AS guia,
@@ -22,18 +23,18 @@ def sync_shipments(con, carrier: str = "dhl", desde: str = "2025-09-01") -> int:
                argMax(sale_price, _synced_at)                AS sale_price,
                argMax(created_at, _synced_at)                AS created_ts
         FROM t1_envios.fct_shipments
-        WHERE carrier_name = %(c)s AND created_at >= %(d)s
+        WHERE carrier_name IN %(c)s AND created_at >= %(d)s
         GROUP BY shipment_number
     """
     con.execute("DELETE FROM ch_shipments")
     total = 0
-    with cli.query_arrow_stream(q, parameters={"c": carrier_ch, "d": desde}) as stream:
+    with cli.query_arrow_stream(q, parameters={"c": carriers, "d": desde}) as stream:
         for batch in stream:
             con.register("_a", batch)
             con.execute("INSERT INTO ch_shipments SELECT * FROM _a")
             con.unregister("_a")
             total += batch.num_rows
-    _stamp(con, "ch_shipments", carrier, desde, total)
+    _stamp(con, "ch_shipments", "multi", desde, total)
     return total
 
 
