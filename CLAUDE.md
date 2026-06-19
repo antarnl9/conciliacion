@@ -113,6 +113,8 @@ $PY -m pytest tests/ -q
 | `paquete_express` | `PAQUETERIA EXPRESS` | **`Rastreo`** (98.7%), NO la `Guía` interna | `Total` |
 
 - **Gotcha Paquete Express:** el `shipment_number` de CH es el **Rastreo**, no la "Guía" (PBC…) que la paquetería usa para facturar. La interna se guarda en `cuenta`.
+- **Cuentas/negociaciones:** Paquete Express tiene 2 cuentas (negociaciones) que llegan en **archivos separados** → se tratan como carriers distintos: `paquete_express` (N1) y `paquete_express_2` (N2), mismo parser y mismo `carrier_name` en CH, pero **rate card aparte**. La cuenta queda pegada a la guía desde el archivo (no se resuelve por cliente).
+- **Paqueterías activas por cliente** (`cliente_carrier`): en el Tarifario se marcan las paqueterías que usa cada cliente; el selector de tarifa solo muestra esas.
 - `ch_sync.sync_shipments` trae **todas** las paqueterías de `CARRIER_CH` en una pasada (`carrier_name IN ...`); el cruce en reconcile es por número de guía (riesgo bajo de colisión entre carriers).
 - Para agregar otra: `parsers/<carrier>.py` (mapear por encabezado), registrar en `parsers/__init__.py`, `config.CARRIER_CH`, y `CARRIERS`/`SUPPORTED`/`CARLBL` en la UI.
 
