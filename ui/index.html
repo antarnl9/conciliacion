@@ -148,7 +148,8 @@
   <nav id="nav">
     <a data-v="cierre" class="active">Cierre de mes</a>
     <a data-v="cobranza">Cobranza</a>
-    <a data-v="tarifas">Configuración de tarifas</a>
+    <a data-v="costos">Costos (paqueterías)</a>
+    <a data-v="tarifas">Tarifario por cliente</a>
     <div class="grouplbl">Reportes</div>
     <a data-v="rep-prepago" class="sub">Prepago</a>
     <a data-v="rep-credito" class="sub">Crédito</a>
@@ -182,7 +183,7 @@
 <div class="dropmenu" id="rowmenu"></div>
 
 <script>
-let TOKEN=null, SB=null, AUTH=false;
+let TOKEN=null, SB=null, AUTH=false, IVA=0.16;
 const _fetch=window.fetch.bind(window);
 // Inyecta el token de Supabase a toda llamada /api/*.
 window.fetch=(u,o={})=>{
@@ -242,19 +243,20 @@ const views = {
     const cls = await jget('/api/tarifas/clientes');
     window.TARCLI = cls;
     const opts = cls.map(c=>`<option value="${c.seller_id}">${c.cliente} · ${c.filas_tarifa} tarifas</option>`).join('');
-    $('#view').innerHTML = toolbar('Configuración de tarifas','Por cliente de crédito: cobro automático (del sistema) o manual (tarifa por paquetería, zona y kilo)') +
+    $('#view').innerHTML = toolbar('Tarifario por cliente','Cómo se cotiza a cada cliente de crédito: automático, margen (global/zona/kilo) sobre el costo, o tarifa flat. Combustible e IVA salen del módulo Costos.') +
       `<div class="filters"><span class="muted">Cliente:</span>
          <select id="t-cliente" style="min-width:340px" onchange="onCliente()">${opts}</select></div>
        <div class="card" style="padding:18px;margin-bottom:16px">
          <div class="cfgrow">
-           <div>
-             <span class="lblform">Tipo de cobro</span>
-             <div class="seg" id="t-cobro">
-               <button data-v="automatica" onclick="setCobro('automatica')">Automático (del sistema)</button>
-               <button data-v="manual" onclick="setCobro('manual')">Manual (tarifa)</button>
-             </div>
-           </div>
-           <div><span class="lblform" title="Margen para extras: piso = costo×(1+margen)">Margen % (extras)</span>
+           <div><span class="lblform">Método de cobro</span>
+             <select id="t-metodo" onchange="setCobro(this.value)" style="min-width:210px">
+               <option value="automatica">Automático (del sistema)</option>
+               <option value="margen_global">Margen global</option>
+               <option value="margen_zona">Margen por zona</option>
+               <option value="margen_kilo">Margen por kilo</option>
+               <option value="flat">Tarifa flat</option>
+             </select></div>
+           <div><span class="lblform" title="Margen global y margen de los extras (re-pesos/retornos)">Margen %</span>
              <input id="t-margen" type="number" step="1" placeholder="14" style="width:96px" onchange="setMargen()"></div>
            <div><span class="lblform">Días de crédito</span>
              <input id="t-dias" type="number" step="1" placeholder="30" style="width:96px" onchange="setDias()"></div>
@@ -300,17 +302,17 @@ const views = {
 const CARRIERS=['dhl','fedex','ups','ampm','t1envios','paqueteria express','99min','estafeta','redpack'];
 window.TAR={seller_id:null,cliente:null,cobro:'automatica',carrier:'dhl'};
 function curCli(){const s=$('#t-cliente');if(!s||!s.value)return null;return (window.TARCLI||[]).find(c=>String(c.seller_id)===s.value);}
-function setSeg(v){document.querySelectorAll('#t-cobro button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
+function normMetodo(v){ return v==='manual'?'flat':(v||'automatica'); }
 window.onCliente=function(){
   const c=curCli(); if(!c){$('#tar-body').innerHTML='';return;}
-  TAR.seller_id=c.seller_id; TAR.cliente=c.cliente; TAR.cobro=c.cobro_tipo||'automatica';
-  setSeg(TAR.cobro);
+  TAR.seller_id=c.seller_id; TAR.cliente=c.cliente; TAR.cobro=normMetodo(c.cobro_tipo);
+  const sm=$('#t-metodo'); if(sm)sm.value=TAR.cobro;
   const mg=$('#t-margen'); if(mg)mg.value=(c.margen!=null?Math.round(c.margen*100):'');
   const dc=$('#t-dias'); if(dc)dc.value=(c.dias_credito!=null?c.dias_credito:'');
   renderTarBody();
 };
 window.setCobro=async function(v){
-  TAR.cobro=v; setSeg(v); renderTarBody();      // UI primero: el formulario aparece de inmediato
+  TAR.cobro=v; renderTarBody();      // UI primero: el editor aparece de inmediato
   try{ await jpost('/api/cliente/cobro',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,cobro_tipo:v}); }catch(e){}
 };
 window.setMargen=async function(){
@@ -322,19 +324,31 @@ window.setDias=async function(){
   await jpost('/api/cliente/cobro',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,dias_credito:v===''?null:Number(v)});
 };
 function renderTarBody(){
-  if(TAR.cobro!=='manual'){
-    $('#tar-body').innerHTML=`<div class="card"><div class="empty"><h3>Cobro automático</h3><p>Este cliente se cobra directo del sistema (precio + sobrepeso). No requiere tarifa.</p></div></div>`;
+  const m=TAR.cobro;
+  if(m==='automatica'){
+    $('#tar-body').innerHTML=`<div class="card"><div class="empty"><h3>Cobro automático</h3><p>Se cobra directo del sistema (precio + sobrepeso). El <b>Margen %</b> de arriba aplica a los <b>extras</b> (re-pesos, retornos, desfases).</p></div></div>`;
     return;
   }
-  const copts=CARRIERS.map(c=>`<option value="${c}" ${c===TAR.carrier?'selected':''}>${c.toUpperCase()}</option>`).join('');
-  $('#tar-body').innerHTML=
-    `<div class="toolbar" style="margin-bottom:12px"><div class="filters" style="margin:0">
-        <span class="muted">Paquetería:</span><select id="t-carrier" onchange="onCarrier()">${copts}</select></div>
-      <div style="display:flex;gap:8px"><button class="btn-secondary" onclick="addTarifa()">+ Fila</button><button class="btn-primary" onclick="saveTarifas()">Guardar tarifas</button></div></div>
-     <div id="tar-grid"></div>`;
-  loadTarifas();
+  const carSel=`<div class="filters" style="margin-bottom:12px"><span class="muted">Paquetería:</span>
+      <select id="t-carrier" onchange="onCarrier()">${CARRIERS.map(c=>`<option value="${c}" ${c===TAR.carrier?'selected':''}>${c.toUpperCase()}</option>`).join('')}</select>
+      <button class="btn-secondary btn-sm" style="margin-left:auto" onclick="loadPreview()">Ver preview de tarifa</button></div>`;
+  let editor='';
+  if(m==='margen_global'){
+    editor=`<div class="card" style="padding:16px"><div style="font-size:13px;color:var(--oxford)">Precio = <b>costo × (1+combustible) × (1+margen) × (1+IVA)</b>, usando el <b>Margen %</b> de arriba para todas las zonas. Define el margen y mira el preview.</div></div>`;
+  } else if(m==='margen_zona'){
+    editor=`<div id="mz-grid"></div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('mz-grid')">+ Zona</button><button class="btn-primary" onclick="saveMargenZona()">Guardar márgenes</button></div>`;
+  } else if(m==='margen_kilo'){
+    editor=`<div id="mk-grid"></div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('mk-grid')">+ Rango</button><button class="btn-primary" onclick="saveMargenKilo()">Guardar márgenes</button></div>`;
+  } else if(m==='flat'){
+    editor=`<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px"><button class="btn-secondary" onclick="addTarifa()">+ Fila</button><button class="btn-primary" onclick="saveTarifas()">Guardar tarifas</button></div><div id="tar-grid"></div>`;
+  }
+  $('#tar-body').innerHTML=carSel+editor+`<div id="tar-preview" style="margin-top:18px"></div>`;
+  if(m==='margen_zona') loadMargenZona();
+  else if(m==='margen_kilo') loadMargenKilo();
+  else if(m==='flat') loadTarifas();
+  loadPreview();
 }
-window.onCarrier=function(){TAR.carrier=$('#t-carrier').value;loadTarifas();};
+window.onCarrier=function(){ TAR.carrier=$('#t-carrier').value; if(TAR.cobro==='flat')loadTarifas(); loadPreview(); };
 function tarGridHTML(rows){
   const body=(rows.length?rows:[{}]).map((r,i)=>
     `<tr data-i="${i}">
@@ -365,7 +379,104 @@ window.delTarifa=i=>{const rows=readTarRows();rows.splice(i,1);$('#tar-grid').in
 window.saveTarifas=async()=>{
   const rows=readTarRows();
   await jpost('/api/tarifas',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,carrier:TAR.carrier,rows});
-  alert(`Guardadas ${rows.length} tarifas (${TAR.carrier.toUpperCase()}) para ${TAR.cliente}`); loadTarifas();
+  $('#job').innerHTML=`<span class="dot ok"></span>${rows.length} tarifas flat guardadas`; loadTarifas(); loadPreview();
+};
+
+// ---- grid editor genérico (costos, combustible, márgenes) ----
+const GRIDS={};
+function gridHTML(gid){
+  const {cols,rows}=GRIDS[gid];
+  const body=(rows.length?rows:[{}]).map((r,i)=>`<tr data-i="${i}">${
+    cols.map(c=>`<td><input class="g-${c.k}" type="${c.type||'text'}" ${c.type==='number'?'step="any"':''} value="${r[c.k]??''}" placeholder="${c.ph||''}" style="width:${c.w||90}px${c.type==='number'?';text-align:right':''}"></td>`).join('')
+  }<td><button class="btn-secondary btn-sm" onclick="gridDel('${gid}',${i})">✕</button></td></tr>`).join('');
+  return `<div class="card"><div class="tblwrap"><table><thead><tr>${cols.map(c=>`<th>${c.label}</th>`).join('')}<th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
+function gridReadRows(gid){
+  const cols=GRIDS[gid].cols;
+  return [...document.querySelectorAll('#'+gid+' tr[data-i]')].map(tr=>{
+    const o={}; cols.forEach(c=>o[c.k]=tr.querySelector('.g-'+c.k).value); return o;
+  }).filter(o=>cols.some(c=>o[c.k]!==''&&o[c.k]!=null));
+}
+function gridInit(gid,cols,rows){ GRIDS[gid]={cols,rows:rows||[]}; const el=$('#'+gid); if(el)el.innerHTML=gridHTML(gid); }
+window.gridAdd=gid=>{ GRIDS[gid].rows=gridReadRows(gid); GRIDS[gid].rows.push({}); $('#'+gid).innerHTML=gridHTML(gid); };
+window.gridDel=(gid,i)=>{ const r=gridReadRows(gid); r.splice(i,1); GRIDS[gid].rows=r; $('#'+gid).innerHTML=gridHTML(gid); };
+
+// ---- Módulo Costos (rate card + combustible) ----
+window.COSTC='dhl';
+views.costos=async function(){
+  const copts=CARRIERS.map(c=>`<option value="${c}" ${c===COSTC?'selected':''}>${c.toUpperCase()}</option>`).join('');
+  $('#view').innerHTML=toolbar('Costos (paqueterías)','Rate card de costo por zona/kilo, combustible por periodo e IVA. De aquí derivan las tarifas por cliente.') +
+    `<div class="filters"><span class="muted">Paquetería:</span><select id="cost-carrier" onchange="onCostCarrier()">${copts}</select>
+       <span class="muted" style="margin-left:18px">IVA aplicado:</span><span style="font-weight:700;color:var(--oxford)">${Math.round(IVA*100)}%</span></div>
+     <div class="card" style="padding:16px;margin-bottom:16px">
+       <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+         <div style="font-weight:700;color:#1F2937;font-size:14px">Tarifa de costo (rate card) · vigencia global</div>
+         <div style="display:flex;gap:16px;align-items:flex-end">
+           <div><span class="lblform">Vigencia desde</span><input type="date" id="cost-vd"></div>
+           <div><span class="lblform">Vigencia hasta</span><input type="date" id="cost-vh"></div>
+         </div>
+       </div>
+       <div id="cost-grid"></div>
+       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('cost-grid')">+ Fila</button><button class="btn-primary" onclick="saveCostos()">Guardar costos</button></div>
+     </div>
+     <div class="card" style="padding:16px">
+       <div style="font-weight:700;color:#1F2937;font-size:14px;margin-bottom:6px">Combustible por periodo</div>
+       <div class="muted" style="font-size:12px;margin-bottom:10px">% que se suma al costo. Cada periodo es un rango de fechas (semanal o mensual).</div>
+       <div id="fuel-grid"></div>
+       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('fuel-grid')">+ Periodo</button><button class="btn-primary" onclick="saveCombustible()">Guardar combustible</button></div>
+     </div>`;
+  await loadCostos();
+};
+window.onCostCarrier=function(){ COSTC=$('#cost-carrier').value; loadCostos(); };
+async function loadCostos(){
+  const [cos,fue]=await Promise.all([jget('/api/costos?carrier='+encodeURIComponent(COSTC)), jget('/api/combustible?carrier='+encodeURIComponent(COSTC))]);
+  $('#cost-vd').value=((cos[0]&&cos[0].vigencia_desde)||'').slice(0,10);
+  $('#cost-vh').value=((cos[0]&&cos[0].vigencia_hasta)||'').slice(0,10);
+  gridInit('cost-grid',[{k:'zona',label:'Zona',w:90},{k:'peso_min',label:'Peso min (kg)',type:'number',w:100},{k:'peso_max',label:'Peso max (kg)',type:'number',w:100},{k:'costo',label:'Costo',type:'number',w:100}],
+    cos.map(r=>({zona:r.zona,peso_min:r.peso_min,peso_max:r.peso_max,costo:r.costo})));
+  gridInit('fuel-grid',[{k:'vigencia_desde',label:'Desde',type:'date',w:150},{k:'vigencia_hasta',label:'Hasta',type:'date',w:150},{k:'pct',label:'% combustible',type:'number',w:110}],
+    fue.map(r=>({vigencia_desde:(r.vigencia_desde||'').slice(0,10),vigencia_hasta:(r.vigencia_hasta||'').slice(0,10),pct:r.pct!=null?+(r.pct*100).toFixed(2):''})));
+}
+window.saveCostos=async function(){
+  const rows=gridReadRows('cost-grid');
+  const r=await jpost('/api/costos',{carrier:COSTC,vigencia_desde:$('#cost-vd').value||null,vigencia_hasta:$('#cost-vh').value||null,rows});
+  $('#job').innerHTML=`<span class="dot ok"></span>costos ${COSTC.toUpperCase()} guardados (${r.filas})`;
+};
+window.saveCombustible=async function(){
+  const rows=gridReadRows('fuel-grid').map(r=>({vigencia_desde:r.vigencia_desde||null,vigencia_hasta:r.vigencia_hasta||null,pct:r.pct===''?null:Number(r.pct)/100}));
+  const r=await jpost('/api/combustible',{carrier:COSTC,rows});
+  $('#job').innerHTML=`<span class="dot ok"></span>combustible ${COSTC.toUpperCase()} guardado (${r.filas})`;
+};
+// ---- editores de margen por zona / kilo + preview ----
+async function loadMargenZona(){
+  const rows=await jget('/api/margen-zona?seller_id='+TAR.seller_id);
+  gridInit('mz-grid',[{k:'zona',label:'Zona',w:110},{k:'margen',label:'Margen %',type:'number',w:110}],
+    rows.map(r=>({zona:r.zona,margen:r.margen!=null?+(r.margen*100).toFixed(2):''})));
+}
+window.saveMargenZona=async function(){
+  const rows=gridReadRows('mz-grid').map(r=>({zona:r.zona,margen:r.margen===''?null:Number(r.margen)/100}));
+  await jpost('/api/margen-zona',{seller_id:Number(TAR.seller_id),rows});
+  $('#job').innerHTML=`<span class="dot ok"></span>márgenes por zona guardados`; loadPreview();
+};
+async function loadMargenKilo(){
+  const rows=await jget('/api/margen-kilo?seller_id='+TAR.seller_id);
+  gridInit('mk-grid',[{k:'peso_min',label:'Peso min (kg)',type:'number',w:100},{k:'peso_max',label:'Peso max (kg)',type:'number',w:100},{k:'margen',label:'Margen %',type:'number',w:110}],
+    rows.map(r=>({peso_min:r.peso_min,peso_max:r.peso_max,margen:r.margen!=null?+(r.margen*100).toFixed(2):''})));
+}
+window.saveMargenKilo=async function(){
+  const rows=gridReadRows('mk-grid').map(r=>({peso_min:r.peso_min,peso_max:r.peso_max,margen:r.margen===''?null:Number(r.margen)/100}));
+  await jpost('/api/margen-kilo',{seller_id:Number(TAR.seller_id),rows});
+  $('#job').innerHTML=`<span class="dot ok"></span>márgenes por kilo guardados`; loadPreview();
+};
+window.loadPreview=async function(){
+  const el=$('#tar-preview'); if(!el)return;
+  el.innerHTML=`<div class="muted" style="font-size:12.5px">Calculando preview…</div>`;
+  const d=await jget(`/api/tarifa-preview?seller_id=${TAR.seller_id}&carrier=${encodeURIComponent(TAR.carrier)}`);
+  if(!d.rows||!d.rows.length){ el.innerHTML=`<div class="muted" style="font-size:12.5px">Sin preview: falta cargar ${d.metodo==='flat'?'las tarifas flat':'la tarifa de costo de '+TAR.carrier.toUpperCase()+' en el módulo Costos'}.</div>`; return; }
+  el.innerHTML=`<div style="font-weight:700;color:#1F2937;font-size:14px;margin-bottom:8px">Preview de tarifa al cliente · ${TAR.carrier.toUpperCase()} (incluye IVA ${Math.round((d.iva||IVA)*100)}%)</div>`+
+    tbl(['Zona','Peso min','Peso max','Costo','Combustible','Precio c/IVA'], d.rows, r=>
+      `<tr><td>${r.zona||'—'}</td><td>${fmt(r.peso_min)}</td><td>${r.peso_max==null?'∞':fmt(r.peso_max)}</td>
+       <td>${r.costo==null?'—':money(r.costo)}</td><td>${r.fuel?(r.fuel*100).toFixed(1)+'%':'—'}</td><td><b>${money(r.precio)}</b></td></tr>`);
 };
 
 // ---- filtro de fechas (mes envío) para reportes ----
@@ -691,7 +802,7 @@ function finishProgress(mes,ok,cl,cb){
 }
 
 // router
-const ROUTER={cierre:()=>views.cierre(),'cobranza':()=>views.cobranza(),'tarifas':()=>views.tarifas(),
+const ROUTER={cierre:()=>views.cierre(),'cobranza':()=>views.cobranza(),'tarifas':()=>views.tarifas(),'costos':()=>views.costos(),
   'rep-prepago':repPrepago,'rep-credito':repCredito,'rep-cobrar':repCobrar,'rep-guias':()=>repGuias(0)};
 function go(v){VIEW=v;document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.v===v));(ROUTER[v]||ROUTER.cierre)();}
 document.querySelectorAll('#nav a').forEach(a=>a.onclick=()=>go(a.dataset.v));
@@ -743,6 +854,7 @@ async function boot(){
   let cfg={};
   try{ cfg=await _fetch('/api/config').then(r=>r.json()); }catch(e){}
   AUTH=!!cfg.auth_enabled;
+  if(cfg.iva!=null)IVA=cfg.iva;
   if(!AUTH){ startApp(); return; }           // sin Supabase: app directa (dev local)
   SB=window.supabase.createClient(cfg.supabase_url, cfg.supabase_key);
   SB.auth.onAuthStateChange((_e,session)=>{ if(session)TOKEN=session.access_token; });

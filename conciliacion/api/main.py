@@ -40,7 +40,8 @@ async def auth_mw(request: Request, call_next):
 def app_config():
     """Config pública para el frontend (URL + llave pública de Supabase)."""
     s = config.supabase_settings()
-    return {"auth_enabled": s["enabled"], "supabase_url": s["url"], "supabase_key": s["public"]}
+    return {"auth_enabled": s["enabled"], "supabase_url": s["url"], "supabase_key": s["public"],
+            "iva": config.IVA_DEFAULT}
 
 
 # ---------- helpers ----------
@@ -606,23 +607,32 @@ def tarifa_preview(seller_id: int, carrier: str = "dhl"):
     try:
         cfg = con.execute("SELECT metodo, margen FROM config_credito WHERE seller_id=?", [seller_id]).fetchone()
         metodo = (cfg[0] if cfg and cfg[0] else "automatica")
+        if metodo == "manual":
+            metodo = "flat"
         if metodo not in _METODOS or metodo == "automatica":
             return {"metodo": metodo, "iva": config.IVA_DEFAULT, "rows": []}
         margen = cfg[1] if cfg else None
+        if metodo == "flat":
+            rows = _rows(con, f"""SELECT zona, peso_min, peso_max, NULL AS costo, 0 AS fuel,
+                          round(precio * (1+{config.IVA_DEFAULT}),2) AS precio
+                          FROM tarifas WHERE seller_id=? AND carrier=? ORDER BY zona, peso_min""",
+                         [seller_id, carrier])
+            return {"metodo": metodo, "iva": config.IVA_DEFAULT, "rows": rows}
+        # OJO: alias externo 'cc' (distinto de 'ct' que usa el motor internamente, si no se rompe la correlación)
         expr = pricing.precio_sql(
-            carrier="ct.carrier", zona="ct.zona", kilo="COALESCE(ct.peso_min,0)",
+            carrier="cc.carrier", zona="cc.zona", kilo="COALESCE(cc.peso_min,0)",
             fecha="current_date", seller=str(int(seller_id)),
             metodo="'" + metodo + "'", margen=("NULL" if margen is None else str(float(margen))))
-        fuel = ("COALESCE((SELECT cb.pct FROM combustible cb WHERE cb.carrier=ct.carrier AND current_date "
+        fuel = ("COALESCE((SELECT cb.pct FROM combustible cb WHERE cb.carrier=cc.carrier AND current_date "
                 "BETWEEN COALESCE(cb.vigencia_desde,DATE '1900-01-01') AND COALESCE(cb.vigencia_hasta,DATE '2999-01-01') "
                 "ORDER BY cb.vigencia_desde DESC LIMIT 1),0)")
         rows = _rows(con, f"""
-            SELECT ct.zona, ct.peso_min, ct.peso_max, ct.costo,
+            SELECT cc.zona, cc.peso_min, cc.peso_max, cc.costo,
                    round({fuel},4) AS fuel, round({expr},2) AS precio
-            FROM costos_tarifa ct
-            WHERE ct.carrier=? AND current_date BETWEEN COALESCE(ct.vigencia_desde,DATE '1900-01-01')
-                  AND COALESCE(ct.vigencia_hasta,DATE '2999-01-01')
-            ORDER BY ct.zona, ct.peso_min""", [carrier])
+            FROM costos_tarifa cc
+            WHERE cc.carrier=? AND current_date BETWEEN COALESCE(cc.vigencia_desde,DATE '1900-01-01')
+                  AND COALESCE(cc.vigencia_hasta,DATE '2999-01-01')
+            ORDER BY cc.zona, cc.peso_min""", [carrier])
         return {"metodo": metodo, "iva": config.IVA_DEFAULT, "rows": rows}
     finally:
         con.close()
