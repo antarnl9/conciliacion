@@ -92,6 +92,29 @@ CREATE TABLE IF NOT EXISTS periodos (
     cerrado_en TIMESTAMP
 );
 
+-- Resultado de la conciliación (placeholder vacío; reconcile.build() lo REEMPLAZA al correr).
+-- Existe desde el arranque para que la UI/API no truenen en una BD recién creada.
+CREATE TABLE IF NOT EXISTS reconciliacion (
+    guia              VARCHAR,
+    carrier           VARCHAR,
+    cliente_real      VARCHAR,
+    seller_id         BIGINT,
+    payment_model     VARCHAR,
+    tipo              VARCHAR,
+    cobro_tipo        VARCHAR,
+    es_retorno        BOOLEAN,
+    has_cost          BOOLEAN,
+    costo             DOUBLE,
+    sale_price        DOUBLE,
+    sobrepeso_cobrado DOUBLE,
+    tarifa_precio     DOUBLE,
+    ingreso           DOUBLE,
+    margen            DOUBLE,
+    estatus           VARCHAR,
+    mes_envio         VARCHAR,
+    mes_factura       VARCHAR
+);
+
 -- Cobro generado por cliente/mes (para descargar y monitorear su estatus).
 CREATE TABLE IF NOT EXISTS cobros (
     seller_id   BIGINT,
