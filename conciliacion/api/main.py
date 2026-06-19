@@ -16,7 +16,7 @@ from .. import config, db, ch_sync, reconcile, export
 from ..parsers import PARSERS
 from . import jobs
 
-UI_DIR = config.REPO_ROOT / "conciliacion" / "ui"
+UI_DIR = config.ROOT / "ui"            # .../conciliacion/ui (local) y /app/ui (Docker)
 UPLOADS = config.DATA_DIR / "uploads"
 
 app = FastAPI(title="Conciliación T1", version="0.1.0")
