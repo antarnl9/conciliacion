@@ -92,13 +92,14 @@
   .crow .nm{flex:1;display:flex;align-items:center;gap:9px;font-weight:600;color:var(--oxford)}
   .crow.off{opacity:.4}
   .crow .fname{font-size:11.5px;color:var(--green-700);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cm-chk{accent-color:var(--red-500);width:15px;height:15px;cursor:pointer}
   .login-ov{position:fixed;inset:0;background:#f3f5f8;display:none;align-items:center;justify-content:center;z-index:1000}
   .login-ov.show{display:flex}
   .login-card{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:34px 30px;width:340px;box-shadow:0 12px 44px rgba(0,0,0,.10)}
-  .login-card h2{margin:14px 0 4px;font-size:20px;color:var(--heading)}
+  .login-card h2{margin:14px 0 4px;font-size:20px;color:var(--gray-900)}
   .login-card .sub{margin:0 0 20px;font-size:13px;color:var(--gray-600)}
   .login-card input{width:100%;margin-bottom:12px;padding:11px 12px;border:1px solid var(--gray-200);border-radius:9px;font-size:14px;font-family:inherit}
-  .login-card .err{color:var(--red);font-size:12.5px;min-height:17px;margin-bottom:6px}
+  .login-card .err{color:var(--red-500);font-size:12.5px;min-height:17px;margin-bottom:6px}
   .login-card button{width:100%}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -142,7 +143,7 @@
     <div class="modal-body">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--blue-100);border:1px solid var(--gray-200);border-radius:9px;padding:11px 13px;margin-bottom:18px">
         <div><div style="font-weight:600;color:var(--oxford);font-size:13px">Datos del sistema</div>
-          <div class="muted" style="font-size:11.5px">Trae los envíos y cobros más recientes de ClickHouse. Hazlo antes de cerrar.</div></div>
+          <div class="muted" style="font-size:11.5px">Trae los envíos y cobros más recientes del sistema. Hazlo antes de cerrar.</div></div>
         <button class="btn-secondary btn-sm" id="b-sync" onclick="syncCH()" style="white-space:nowrap">Sincronizar</button>
       </div>
       <label class="lblform">Mes a cerrar</label>
@@ -219,12 +220,12 @@ const views = {
     const cls = await jget('/api/tarifas/clientes');
     window.TARCLI = cls;
     const opts = cls.map(c=>`<option value="${c.seller_id}">${c.cliente} · ${c.filas_tarifa} tarifas</option>`).join('');
-    $('#view').innerHTML = toolbar('Configuración de tarifas','Por cliente de crédito: cobro automático (ClickHouse) o manual (tarifa por paquetería, zona y kilo)') +
+    $('#view').innerHTML = toolbar('Configuración de tarifas','Por cliente de crédito: cobro automático (del sistema) o manual (tarifa por paquetería, zona y kilo)') +
       `<div class="filters">
          <span class="muted">Cliente:</span>
          <select id="t-cliente" style="min-width:300px" onchange="onCliente()">${opts}</select>
          <span class="muted" style="margin-left:16px">Cobro:</span>
-         <label style="font-size:13px;color:var(--oxford)"><input type="radio" name="cobro" value="automatica" onchange="setCobro('automatica')"> Automático (ClickHouse)</label>
+         <label style="font-size:13px;color:var(--oxford)"><input type="radio" name="cobro" value="automatica" onchange="setCobro('automatica')"> Automático (del sistema)</label>
          <label style="font-size:13px;color:var(--oxford);margin-left:6px"><input type="radio" name="cobro" value="manual" onchange="setCobro('manual')"> Manual (tarifa)</label>
        </div>
        <div id="tar-body"></div>`;
@@ -272,7 +273,7 @@ window.setCobro=async function(v){
 };
 function renderTarBody(){
   if(TAR.cobro!=='manual'){
-    $('#tar-body').innerHTML=`<div class="card"><div class="empty"><h3>Cobro automático</h3><p>Este cliente se cobra directo de ClickHouse (sale_price + sobrepeso). No requiere tarifa.</p></div></div>`;
+    $('#tar-body').innerHTML=`<div class="card"><div class="empty"><h3>Cobro automático</h3><p>Este cliente se cobra directo del sistema (precio + sobrepeso). No requiere tarifa.</p></div></div>`;
     return;
   }
   const copts=CARRIERS.map(c=>`<option value="${c}" ${c===TAR.carrier?'selected':''}>${c.toUpperCase()}</option>`).join('');
@@ -400,7 +401,7 @@ window.openCierreModal=async function(mes){
     return `<div class="crow${sup?'':' off'}" data-c="${c}">
        <label class="nm"><input type="checkbox" class="cm-chk" data-c="${c}" ${sup?'checked':'disabled'} onchange="toggleCarrier('${c}')"> ${c.toUpperCase()}
          ${sup?'<span class="badge b-green" style="font-size:9px;padding:1px 6px">Listo</span>':'<span class="badge b-gray" style="font-size:9px;padding:1px 6px">Próximamente</span>'}</label>
-       <label class="file"><span class="btn-secondary btn-sm" ${sup?'':'style="pointer-events:none;opacity:.45"'}>Subir Excel</span><input type="file" class="cm-file" data-c="${c}" accept=".xlsx" ${sup?'':'disabled'} onchange="cmFile('${c}')"></label>
+       <label class="file"><span class="btn-primary btn-sm" ${sup?'':'style="pointer-events:none;opacity:.45"'}>Subir Excel</span><input type="file" class="cm-file" data-c="${c}" accept=".xlsx" ${sup?'':'disabled'} onchange="cmFile('${c}')"></label>
        <span class="fname" data-c="${c}"></span>
      </div>`;}).join('');
   updateCierreCount();
