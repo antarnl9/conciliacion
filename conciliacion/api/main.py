@@ -579,6 +579,25 @@ def cobro_enviar(payload: dict):
         con.close()
 
 
+def _recompute_cobro(con, sid, mes) -> float:
+    """Recalcula monto_pagado y estatus de un cobro a partir de sus pagos.
+    Si no hay pagos, conserva el estatus del ciclo (generado/enviado/aprobado)."""
+    pagado = con.execute("SELECT COALESCE(round(sum(monto),2),0) FROM pagos WHERE seller_id=? AND mes=?",
+                         [sid, mes]).fetchone()[0]
+    row = con.execute("SELECT monto, estatus FROM cobros WHERE seller_id=? AND mes=?", [sid, mes]).fetchone()
+    if not row:
+        return pagado
+    total, cur = (row[0] or 0), row[1]
+    if pagado >= total - 0.5:
+        est = "pagado"
+    elif pagado > 0:
+        est = "parcial"
+    else:
+        est = cur if cur in ("generado", "enviado", "aprobado") else "enviado"
+    con.execute("UPDATE cobros SET monto_pagado=?, estatus=? WHERE seller_id=? AND mes=?", [pagado, est, sid, mes])
+    return pagado
+
+
 @app.post("/api/cobro/pago")
 def cobro_pago(payload: dict):
     """Registra un abono (pago parcial o total). Recalcula saldo y estatus."""
@@ -589,14 +608,36 @@ def cobro_pago(payload: dict):
     try:
         con.execute("INSERT INTO pagos VALUES (?,?,?,?,?, now())",
                     [sid, mes, fecha, monto, payload.get("nota")])
-        pagado = con.execute("SELECT round(sum(monto),2) FROM pagos WHERE seller_id=? AND mes=?",
-                             [sid, mes]).fetchone()[0] or 0
+        pagado = _recompute_cobro(con, sid, mes)
         trow = con.execute("SELECT monto FROM cobros WHERE seller_id=? AND mes=?", [sid, mes]).fetchone()
         total = (trow[0] if trow else 0) or 0
-        est = "pagado" if pagado >= total - 0.5 else ("parcial" if pagado > 0 else "enviado")
-        con.execute("UPDATE cobros SET monto_pagado=?, estatus=? WHERE seller_id=? AND mes=?",
-                    [pagado, est, sid, mes])
-        return {"ok": True, "pagado": pagado, "saldo": round(total - pagado, 2), "estatus": est}
+        return {"ok": True, "pagado": pagado, "saldo": round(total - pagado, 2)}
+    finally:
+        con.close()
+
+
+@app.get("/api/cobro/pagos")
+def list_pagos(seller_id: int, mes: str):
+    """Histórico de abonos de un cliente/mes."""
+    con = db.connect()
+    try:
+        return _rows(con, """SELECT rowid AS id, CAST(fecha AS VARCHAR) fecha, monto, nota,
+                                    CAST(registrado_en AS VARCHAR) registrado_en
+                             FROM pagos WHERE seller_id=? AND mes=? ORDER BY fecha, registrado_en""",
+                     [seller_id, mes])
+    finally:
+        con.close()
+
+
+@app.post("/api/cobro/pago/eliminar")
+def del_pago(payload: dict):
+    """Elimina un abono (corrección) y recalcula el cobro."""
+    sid = int(payload["seller_id"]); mes = payload["mes"]; pid = int(payload["id"])
+    con = db.connect()
+    try:
+        con.execute("DELETE FROM pagos WHERE rowid=? AND seller_id=? AND mes=?", [pid, sid, mes])
+        _recompute_cobro(con, sid, mes)
+        return {"ok": True}
     finally:
         con.close()
 

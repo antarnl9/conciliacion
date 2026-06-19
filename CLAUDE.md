@@ -51,9 +51,10 @@ ClickHouse fct_shipments + fct_wallet_transactions --sync--> ch_shipments / ch_s
 - **Prepago** → solo extras (Σ `extra`); aparece únicamente si hay extras > 0. `concepto='extra'`.
 - Es **upsert**: conserva el ciclo (fecha enviada, pagos) de cobros ya existentes al regenerar.
 
-Ciclo en la UI (vista Cobranza): `generado → enviado → parcial → pagado`.
-- **Enviar** (`cobro/enviar`): fija `fecha_enviada` y calcula `fecha_vencimiento = fecha + dias_credito` (de `config_credito`, default `config.DIAS_CREDITO_DEFAULT`=30). `dias_atraso` se deriva contra `current_date`.
-- **Pagos parciales** (`cobro/pago` → tabla `pagos`): `saldo = monto − Σ pagos`; estatus pasa a `parcial`/`pagado`.
+Ciclo en la UI (vista Cobranza): `generado → enviado → aprobado → parcial → pagado`.
+- **Enviar** (`cobro/enviar`): fija `fecha_enviada` y calcula `fecha_vencimiento = fecha + dias_credito` (de `config_credito`, default `config.DIAS_CREDITO_DEFAULT`=30). `dias_atraso` se deriva contra `current_date`. Las vencidas (atraso > 0) se pintan en rojo.
+- **Aprobado** (`cobro/estatus` con `'aprobado'`): el cliente aprobó; los días de crédito **siguen contando desde `fecha_enviada`** (aprobar no reinicia el vencimiento).
+- **Pagos parciales** (`cobro/pago` → tabla `pagos`, histórico por cliente; `cobro/pagos` lista, `cobro/pago/eliminar` borra por `rowid`): `saldo = monto − Σ pagos`; `_recompute_cobro` actualiza estatus a `parcial`/`pagado` y conserva `enviado`/`aprobado` si no hay pagos.
 - **Excel por cliente** (`cobro/seller`): detalle SIN costo ni margen. Crédito = todas las guías con `ingreso`; prepago = solo guías con `extra`.
 - **PDF de factura** → Supabase Storage (bucket `facturas`); en dev local cae a disco.
 

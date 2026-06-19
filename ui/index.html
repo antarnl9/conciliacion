@@ -119,6 +119,7 @@
   .seg button:not(.active):hover{background:var(--blue-100)}
   .cfgrow{display:flex;align-items:flex-end;gap:26px;flex-wrap:wrap}
   .cfgrow .lblform{margin-bottom:7px}
+  tr.overdue td{background:var(--red-50)}
   .login-ov{position:fixed;inset:0;background:#f3f5f8;display:none;align-items:center;justify-content:center;z-index:1000}
   .login-ov.show{display:flex}
   .login-card{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:34px 30px;width:340px;box-shadow:0 12px 44px rgba(0,0,0,.10)}
@@ -271,14 +272,14 @@ const views = {
     const tot = rows.reduce((a,r)=>a+(r.monto||0),0);
     const pagado = rows.reduce((a,r)=>a+(r.pagado||0),0);
     const venc = rows.filter(r=>r.dias_atraso>0).length;
-    const ESTB={generado:'b-gray',enviado:'b-blue',parcial:'b-yellow',pagado:'b-green'};
+    const ESTB={generado:'b-gray',enviado:'b-blue',aprobado:'b-yellow',parcial:'b-orange',pagado:'b-green'};
     $('#view').innerHTML = toolbar('Cobranza',
         `${COBMES} · por cobrar $${fmt(tot)} · pagado $${fmt(pagado)} · saldo $${fmt(tot-pagado)} · ${venc} vencidos`, '') +
       `<div class="filters"><span class="muted">Mes:</span><select id="cob-mes" onchange="cobMes()">${opts}</select>
          <button class="btn-secondary btn-sm" style="margin-left:auto" onclick="generarCobro()" title="Recalcula el cobro del mes desde la conciliación. Úsalo si cambiaste un margen o una tarifa (conserva pagos registrados).">↻ Regenerar</button></div>` +
       (rows.length ? tbl(['Cliente','Tipo','Guías','Monto','Pagado','Saldo','Vence','Estatus',''], rows, r=>{
         const vence=r.fecha_vencimiento ? `${r.fecha_vencimiento}${r.dias_atraso>0?` <span style="color:var(--red-700);font-weight:600">+${r.dias_atraso}d</span>`:''}` : '—';
-        return `<tr><td><b>${r.cliente||'—'}</b></td>
+        return `<tr class="${r.dias_atraso>0?'overdue':''}"><td><b>${r.cliente||'—'}</b></td>
           <td><span class="badge ${r.tipo==='credito'?'b-blue':'b-gray'}">${r.tipo}${r.concepto==='extra'?' · extra':''}</span></td>
           <td>${fmt(r.guias)}</td><td><b>${money(r.monto)}</b></td><td>${money(r.pagado)}</td>
           <td class="${r.saldo>0.5?'neg':'pos'}"><b>${money(r.saldo)}</b></td>
@@ -499,7 +500,9 @@ window.openRowMenu=function(sid,saldo,estatus,tienePdf,ev){
   const m=$('#rowmenu');
   m.innerHTML=[
     estatus==='generado'?`<a onclick="enviarFactura(${sid})">Enviar factura</a>`:'',
+    estatus==='enviado'?`<a onclick="aprobarCobro(${sid})">Marcar aprobado</a>`:'',
     estatus!=='pagado'?`<a onclick="registrarPago(${sid},${saldo})">Registrar pago</a>`:'',
+    `<a onclick="verCobroDetalle(${sid})">Ver detalle / abonos</a>`,
     `<a href="${dl(`/api/cobro/seller?seller_id=${sid}&mes=${COBMES}`)}">Descargar Excel</a>`,
     tienePdf?`<a href="${dl(`/api/cobro/pdf?seller_id=${sid}&mes=${COBMES}`)}" target="_blank">Ver factura ✓</a>`
             :`<label>Adjuntar factura<input type="file" accept=".pdf" style="display:none" onchange="subirPdf(${sid},this)"></label>`
@@ -510,11 +513,27 @@ window.openRowMenu=function(sid,saldo,estatus,tienePdf,ev){
 };
 document.addEventListener('click',e=>{ if(!e.target.closest('.kebab')) $('#rowmenu').classList.remove('show'); });
 window.closeModal2=()=>$('#modal2').classList.remove('show');
+window.aprobarCobro=async function(sid){
+  $('#rowmenu').classList.remove('show');
+  await jpost('/api/cobro/estatus',{seller_id:sid,mes:COBMES,estatus:'aprobado'});
+  $('#job').innerHTML=`<span class="dot ok"></span>cobro marcado aprobado`;
+  views.cobranza();
+};
 window.verCobroDetalle=async function(sid){
   $('#rowmenu').classList.remove('show');
-  const d=await jget(`/api/cobro/detalle?seller_id=${sid}&mes=${COBMES}`);
+  const [d,pg]=await Promise.all([
+    jget(`/api/cobro/detalle?seller_id=${sid}&mes=${COBMES}`),
+    jget(`/api/cobro/pagos?seller_id=${sid}&mes=${COBMES}`)
+  ]);
   if(d.error){alert('Sin cobro para este cliente en '+COBMES);return;}
   $('#m2-title').textContent=`${d.cliente} · ${COBMES}`;
+  const hoy=new Date().toISOString().slice(0,10);
+  const hist=(pg||[]).length
+    ? `<table><thead><tr><th>Fecha</th><th>Monto</th><th>Nota</th><th></th></tr></thead><tbody>${
+        pg.map(p=>`<tr><td>${p.fecha||'—'}</td><td><b>${money(p.monto)}</b></td><td>${p.nota||'—'}</td>
+          <td><button class="kebab" style="width:26px;height:26px;font-size:13px" title="Eliminar abono" onclick="delPago(${p.id},${sid})">✕</button></td></tr>`).join('')
+      }</tbody></table>`
+    : `<div class="muted" style="font-size:12.5px;padding:9px 4px">Sin abonos registrados.</div>`;
   $('#m2-body').innerHTML=`
     <div class="dkpi">
       <div><div class="b">Tipo</div><div class="v" style="font-size:14px">${d.tipo}${d.concepto==='extra'?' · extra':''}</div></div>
@@ -524,15 +543,34 @@ window.verCobroDetalle=async function(sid){
       <div><div class="b">Estatus</div><div class="v" style="font-size:14px">${d.estatus}</div></div>
       ${d.fecha_vencimiento?`<div><div class="b">Vence</div><div class="v" style="font-size:14px">${d.fecha_vencimiento}</div></div>`:''}
     </div>
+    <div style="font-weight:700;color:#1F2937;font-size:14px;margin:2px 0 10px">Pagos / abonos</div>
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+      <div><div class="lblform">Monto</div><input id="pg-monto" type="number" step="any" placeholder="$" style="width:120px"></div>
+      <div><div class="lblform">Fecha</div><input id="pg-fecha" type="date" value="${hoy}"></div>
+      <div style="flex:1;min-width:140px"><div class="lblform">Nota</div><input id="pg-nota" placeholder="referencia (opcional)" style="width:100%"></div>
+      <button class="btn-primary btn-sm" onclick="addPagoDetalle(${sid})">Registrar abono</button>
+    </div>
+    <div class="card" style="padding:0;margin-bottom:18px"><div class="tblwrap">${hist}</div></div>
+    <div style="font-weight:700;color:#1F2937;font-size:14px;margin:2px 0 8px">Guías cobradas</div>
     <div class="muted" style="font-size:12px;margin-bottom:8px">${d.concepto==='extra'
-      ? 'Cobro de <b>extras</b> (sobrepeso, retornos o desfase de costo): solo las guías con cargo adicional.'
-      : 'Factura completa del periodo: todas las guías cobradas al cliente.'} ${d.guias.length>=500?'· (mostrando las primeras 500 por importe)':''}</div>
-    <div class="tblwrap" style="max-height:48vh;overflow:auto">
+      ? 'Solo las guías con <b>extra</b> (sobrepeso, retornos o desfase).'
+      : 'Todas las guías cobradas al cliente.'} ${d.guias.length>=500?'· (primeras 500 por importe)':''}</div>
+    <div class="tblwrap" style="max-height:38vh;overflow:auto">
       <table><thead><tr><th>Guía</th><th>Fecha</th><th>Producto</th><th>Destino</th><th>Kilos</th><th>Zona</th><th>Importe</th></tr></thead>
       <tbody>${d.guias.map(g=>`<tr><td>${g.guia||'—'}${g.es_retorno?' ↩︎':''}</td><td>${g.fecha||'—'}</td><td>${g.producto||'—'}</td>
         <td>${g.destino||'—'}</td><td>${fmt(g.kilos)}</td><td>${g.zona||'—'}</td><td><b>${money(g.importe)}</b></td></tr>`).join('')}</tbody></table>
     </div>`;
   $('#modal2').classList.add('show');
+};
+window.addPagoDetalle=async function(sid){
+  const monto=Number($('#pg-monto').value); if(!(monto>0)){alert('Monto inválido');return;}
+  await jpost('/api/cobro/pago',{seller_id:sid,mes:COBMES,monto,fecha:$('#pg-fecha').value||undefined,nota:$('#pg-nota').value||undefined});
+  verCobroDetalle(sid); views.cobranza();
+};
+window.delPago=async function(id,sid){
+  if(!confirm('¿Eliminar este abono?'))return;
+  await jpost('/api/cobro/pago/eliminar',{id,seller_id:sid,mes:COBMES});
+  verCobroDetalle(sid); views.cobranza();
 };
 window.subirPdf=async function(sid,input){
   const f=input.files[0]; if(!f)return;
