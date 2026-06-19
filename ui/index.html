@@ -279,14 +279,17 @@ const views = {
          <button class="btn-secondary btn-sm" style="margin-left:auto" onclick="generarCobro()" title="Recalcula el cobro del mes desde la conciliación. Úsalo si cambiaste un margen o una tarifa (conserva pagos registrados).">↻ Regenerar</button></div>` +
       (rows.length ? tbl(['Cliente','Tipo','Guías','Monto','Pagado','Saldo','Vence','Estatus',''], rows, r=>{
         const vence=r.fecha_vencimiento ? `${r.fecha_vencimiento}${r.dias_atraso>0?` <span style="color:var(--red-700);font-weight:600">+${r.dias_atraso}d</span>`:''}` : '—';
+        const nb = r.estatus==='generado' ? `<button class="btn-primary btn-sm" onclick="enviarFactura(${r.seller_id})">Enviar factura</button>`
+          : r.estatus==='enviado' ? `<button class="btn-primary btn-sm" onclick="aprobarCobro(${r.seller_id})">Aprobar</button>`
+          : (r.estatus==='aprobado'||r.estatus==='parcial') ? `<button class="btn-primary btn-sm" onclick="verCobroDetalle(${r.seller_id})">Registrar pago</button>`
+          : `<button class="btn-secondary btn-sm" onclick="verCobroDetalle(${r.seller_id})">Ver detalle</button>`;
         return `<tr class="${r.dias_atraso>0?'overdue':''}"><td><b>${r.cliente||'—'}</b></td>
           <td><span class="badge ${r.tipo==='credito'?'b-blue':'b-gray'}">${r.tipo}${r.concepto==='extra'?' · extra':''}</span></td>
           <td>${fmt(r.guias)}</td><td><b>${money(r.monto)}</b></td><td>${money(r.pagado)}</td>
           <td class="${r.saldo>0.5?'neg':'pos'}"><b>${money(r.saldo)}</b></td>
           <td style="font-size:12px;white-space:nowrap">${vence}</td>
           <td><span class="badge ${ESTB[r.estatus]||'b-gray'}">${r.estatus}</span></td>
-          <td><div style="display:flex;gap:7px;align-items:center;justify-content:flex-end">
-            <button class="btn-secondary btn-sm" onclick="verCobroDetalle(${r.seller_id})">Ver detalle</button>
+          <td><div style="display:flex;gap:7px;align-items:center;justify-content:flex-end">${nb}
             <button class="kebab" onclick="openRowMenu(${r.seller_id},${r.saldo},'${r.estatus}',${r.tiene_pdf?1:0},event)">⋮</button></div></td></tr>`;})
       : `<div class="card"><div class="empty"><h3>Sin cobro generado para ${COBMES}</h3><p>El cobro se genera solo al cerrar el mes. Si ya cerraste y no aparece, usa "↻ Regenerar".</p></div></div>`);
   },
@@ -498,11 +501,11 @@ window.registrarPago=async function(sid,saldo){
 window.openRowMenu=function(sid,saldo,estatus,tienePdf,ev){
   ev.stopPropagation();
   const m=$('#rowmenu');
+  const pay=(estatus==='aprobado'||estatus==='parcial');
   m.innerHTML=[
-    estatus==='generado'?`<a onclick="enviarFactura(${sid})">Enviar factura</a>`:'',
-    estatus==='enviado'?`<a onclick="aprobarCobro(${sid})">Marcar aprobado</a>`:'',
-    estatus!=='pagado'?`<a onclick="registrarPago(${sid},${saldo})">Registrar pago</a>`:'',
     `<a onclick="verCobroDetalle(${sid})">Ver detalle / abonos</a>`,
+    pay?`<a onclick="pagarTodo(${sid},${saldo})">Pagar todo</a>`:'',
+    pay?`<a onclick="registrarPago(${sid},${saldo})">Abonar</a>`:'',
     `<a href="${dl(`/api/cobro/seller?seller_id=${sid}&mes=${COBMES}`)}">Descargar Excel</a>`,
     tienePdf?`<a href="${dl(`/api/cobro/pdf?seller_id=${sid}&mes=${COBMES}`)}" target="_blank">Ver factura ✓</a>`
             :`<label>Adjuntar factura<input type="file" accept=".pdf" style="display:none" onchange="subirPdf(${sid},this)"></label>`
@@ -517,23 +520,47 @@ window.aprobarCobro=async function(sid){
   $('#rowmenu').classList.remove('show');
   await jpost('/api/cobro/estatus',{seller_id:sid,mes:COBMES,estatus:'aprobado'});
   $('#job').innerHTML=`<span class="dot ok"></span>cobro marcado aprobado`;
+  if($('#modal2').classList.contains('show'))verCobroDetalle(sid);
+  views.cobranza();
+};
+window.pagarTodo=async function(sid,saldo){
+  $('#rowmenu').classList.remove('show');
+  if(!(saldo>0)){alert('No hay saldo pendiente.');return;}
+  if(!confirm(`¿Registrar el pago total de $${fmt(saldo)}?`))return;
+  await jpost('/api/cobro/pago',{seller_id:sid,mes:COBMES,monto:saldo});
+  $('#job').innerHTML=`<span class="dot ok"></span>pagado $${fmt(saldo)}`;
+  if($('#modal2').classList.contains('show'))verCobroDetalle(sid);
   views.cobranza();
 };
 window.verCobroDetalle=async function(sid){
   $('#rowmenu').classList.remove('show');
-  const [d,pg]=await Promise.all([
+  $('#m2-title').textContent='Detalle de cobro';
+  $('#m2-body').innerHTML='<div class="muted" style="padding:26px;text-align:center">Cargando…</div>';
+  $('#modal2').classList.add('show');                       // muestra el modal de inmediato
+  let d,pg;
+  try{ [d,pg]=await Promise.all([
     jget(`/api/cobro/detalle?seller_id=${sid}&mes=${COBMES}`),
     jget(`/api/cobro/pagos?seller_id=${sid}&mes=${COBMES}`)
-  ]);
-  if(d.error){alert('Sin cobro para este cliente en '+COBMES);return;}
+  ]); }catch(e){ $('#m2-body').innerHTML='<div class="muted" style="padding:26px;color:var(--red-700)">No se pudo cargar el detalle.</div>'; return; }
+  if(!d||d.error){ $('#m2-body').innerHTML=`<div class="muted" style="padding:26px">Sin cobro para este cliente en ${COBMES}.</div>`; return; }
   $('#m2-title').textContent=`${d.cliente} · ${COBMES}`;
   const hoy=new Date().toISOString().slice(0,10);
-  const hist=(pg||[]).length
+  const canPay=['aprobado','parcial','pagado'].includes(d.estatus);
+  const hist=(Array.isArray(pg)&&pg.length)
     ? `<table><thead><tr><th>Fecha</th><th>Monto</th><th>Nota</th><th></th></tr></thead><tbody>${
         pg.map(p=>`<tr><td>${p.fecha||'—'}</td><td><b>${money(p.monto)}</b></td><td>${p.nota||'—'}</td>
           <td><button class="kebab" style="width:26px;height:26px;font-size:13px" title="Eliminar abono" onclick="delPago(${p.id},${sid})">✕</button></td></tr>`).join('')
       }</tbody></table>`
     : `<div class="muted" style="font-size:12.5px;padding:9px 4px">Sin abonos registrados.</div>`;
+  const payForm=canPay
+    ? `<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+        <div><div class="lblform">Monto</div><input id="pg-monto" type="number" step="any" placeholder="$" style="width:120px"></div>
+        <div><div class="lblform">Fecha</div><input id="pg-fecha" type="date" value="${hoy}"></div>
+        <div style="flex:1;min-width:120px"><div class="lblform">Nota</div><input id="pg-nota" placeholder="referencia (opcional)" style="width:100%"></div>
+        <button class="btn-secondary btn-sm" onclick="addPagoDetalle(${sid})">Abonar</button>
+        ${d.saldo>0.5?`<button class="btn-primary btn-sm" onclick="pagarTodo(${sid},${d.saldo})">Pagar todo</button>`:''}
+      </div>`
+    : `<div class="muted" style="font-size:12.5px;margin-bottom:12px">Primero <b>envía</b> y <b>aprueba</b> el cobro para registrar pagos.</div>`;
   $('#m2-body').innerHTML=`
     <div class="dkpi">
       <div><div class="b">Tipo</div><div class="v" style="font-size:14px">${d.tipo}${d.concepto==='extra'?' · extra':''}</div></div>
@@ -544,23 +571,17 @@ window.verCobroDetalle=async function(sid){
       ${d.fecha_vencimiento?`<div><div class="b">Vence</div><div class="v" style="font-size:14px">${d.fecha_vencimiento}</div></div>`:''}
     </div>
     <div style="font-weight:700;color:#1F2937;font-size:14px;margin:2px 0 10px">Pagos / abonos</div>
-    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
-      <div><div class="lblform">Monto</div><input id="pg-monto" type="number" step="any" placeholder="$" style="width:120px"></div>
-      <div><div class="lblform">Fecha</div><input id="pg-fecha" type="date" value="${hoy}"></div>
-      <div style="flex:1;min-width:140px"><div class="lblform">Nota</div><input id="pg-nota" placeholder="referencia (opcional)" style="width:100%"></div>
-      <button class="btn-primary btn-sm" onclick="addPagoDetalle(${sid})">Registrar abono</button>
-    </div>
+    ${payForm}
     <div class="card" style="padding:0;margin-bottom:18px"><div class="tblwrap">${hist}</div></div>
     <div style="font-weight:700;color:#1F2937;font-size:14px;margin:2px 0 8px">Guías cobradas</div>
     <div class="muted" style="font-size:12px;margin-bottom:8px">${d.concepto==='extra'
       ? 'Solo las guías con <b>extra</b> (sobrepeso, retornos o desfase).'
-      : 'Todas las guías cobradas al cliente.'} ${d.guias.length>=500?'· (primeras 500 por importe)':''}</div>
-    <div class="tblwrap" style="max-height:38vh;overflow:auto">
+      : 'Todas las guías cobradas al cliente.'} ${d.guias&&d.guias.length>=500?'· (primeras 500 por importe)':''}</div>
+    <div class="tblwrap" style="max-height:36vh;overflow:auto">
       <table><thead><tr><th>Guía</th><th>Fecha</th><th>Producto</th><th>Destino</th><th>Kilos</th><th>Zona</th><th>Importe</th></tr></thead>
-      <tbody>${d.guias.map(g=>`<tr><td>${g.guia||'—'}${g.es_retorno?' ↩︎':''}</td><td>${g.fecha||'—'}</td><td>${g.producto||'—'}</td>
+      <tbody>${(d.guias||[]).map(g=>`<tr><td>${g.guia||'—'}${g.es_retorno?' ↩︎':''}</td><td>${g.fecha||'—'}</td><td>${g.producto||'—'}</td>
         <td>${g.destino||'—'}</td><td>${fmt(g.kilos)}</td><td>${g.zona||'—'}</td><td><b>${money(g.importe)}</b></td></tr>`).join('')}</tbody></table>
     </div>`;
-  $('#modal2').classList.add('show');
 };
 window.addPagoDetalle=async function(sid){
   const monto=Number($('#pg-monto').value); if(!(monto>0)){alert('Monto inválido');return;}
