@@ -31,9 +31,15 @@ ClickHouse fct_shipments + fct_wallet_transactions --sync--> ch_shipments / ch_s
 - **Modelo de cobro (jun 2026, núcleo de `reconcile.py` + `cobro/generar`).** Por guía, con `m` = margen del cliente (`config_credito.margen` o `config.MARGEN_EXTRA_DEFAULT`=0.14):
   - `ya_cobrado = sale_price + sobrepeso_ya_cobrado`
   - `piso = costo × (1 + m)`  ·  `extra = max(0, piso − ya_cobrado)` → cubre sobrepeso, retornos y desfase, **con margen**.
-  - **Crédito manual** (`config_credito.metodo='manual'`): ingreso = **tarifa(zona,kilo)** de la matriz `tarifas` (re-pesos y retornos ya vienen como guía en el Acre → la tarifa los cubre; sin `extra`).
-  - **Crédito automático**: ingreso = `max(ya_cobrado, piso)` = precio del sistema **+ extra**.
+  - **Crédito automático** (`config_credito.metodo='automatica'`): ingreso = `max(ya_cobrado, piso)` = precio del sistema **+ extra**.
+  - **Crédito manual** (métodos `flat` | `margen_global` | `margen_zona` | `margen_kilo`): ingreso = **precio del cliente** calculado por `pricing.precio_sql` (ver abajo); sin `extra` (la tarifa por guía ya cubre re-pesos/retornos).
   - **Prepago**: ingreso = `max(ya_cobrado, piso)`; el **`extra`** es lo único pendiente de cobrar (ya pagó la base con saldo).
+- **Módulo de Costos + precio del cliente (`pricing.py`, jul 2026).** Para los métodos manuales el precio sale de un **rate card de costo** por paquetería, no de una matriz por cliente:
+  - `costos_tarifa` (carrier, zona×kilo → costo, **vigencia global** por versión) · `combustible` (carrier, % por periodo: semanal o mensual) · IVA = `config.IVA_DEFAULT` (16%).
+  - `precio = costo(zona,kilo,vigente) × (1+combustible_del_periodo) × (1+margen) × (1+IVA)`. `flat` ignora costo/fuel: `precio_fijo × (1+IVA)`.
+  - Margen según método: `margen_global` (config_credito.margen), `margen_zona` (tabla `margen_zona`), `margen_kilo` (tabla `margen_kilo`).
+  - **Preview** (`/api/tarifa-preview`): muestra la matriz resultante por cliente para validar antes de cerrar. OJO: el alias externo del preview es `cc` (no `ct`) para no chocar con los alias internos de `pricing.precio_sql`.
+  - `'manual'` (config vieja) se normaliza a `'flat'`.
 - **Internos** SN00449 / SE00724 / Inbursa*: `sale_price=0` inter-empresa; ingreso = costo × 1.14. En `config.CUENTAS_INTERNAS_MARGEN` / `INTERNAS_SUBSTRING_MARGEN`.
 - **Sobrepeso** = `Cargo por sobrepeso` en `fct_wallet_transactions` (reference = guía). El gap costo−ya_cobrado en prepago suele ser re-peso por sub-declaración (cliente declara chico → DHL re-pesa → se cobra como `extra`).
 - **Retornos** (`Referencia ~ ^RT\d{10}$`, los 10 dígitos = guía original): se atribuyen al **seller de la guía original** (join extra a `ch_shipments` por `orig_guia`), se cobran completos a costo+margen como una guía más. ~97% se resuelven.
