@@ -365,19 +365,20 @@ function tarGridHTML(rows){
     <thead><tr><th>Zona</th><th>Peso min (kg)</th><th>Peso max (kg)</th><th>Precio</th><th>Vigencia desde</th><th>Vigencia hasta</th><th></th></tr></thead>
     <tbody>${body}</tbody></table></div></div>`;
 }
-function readTarRows(){
-  return [...document.querySelectorAll('#tar-grid tr[data-i]')].map(tr=>({
+function readTarRows(keepEmpty){
+  const rows=[...document.querySelectorAll('#tar-grid tr[data-i]')].map(tr=>({
     zona:tr.querySelector('.tz').value, peso_min:tr.querySelector('.tpmin').value,
     peso_max:tr.querySelector('.tpmax').value, precio:tr.querySelector('.tpre').value,
     vigencia_desde:tr.querySelector('.tvd').value, vigencia_hasta:tr.querySelector('.tvh').value,
-  })).filter(r=>r.zona||r.precio);
+  }));
+  return keepEmpty ? rows : rows.filter(r=>r.zona||r.precio);
 }
 async function loadTarifas(){
   const rows=await jget(`/api/tarifas?seller_id=${TAR.seller_id}&carrier=${encodeURIComponent(TAR.carrier)}`);
   $('#tar-grid').innerHTML=tarGridHTML(rows);
 }
-window.addTarifa=()=>{const rows=readTarRows();rows.push({});$('#tar-grid').innerHTML=tarGridHTML(rows);};
-window.delTarifa=i=>{const rows=readTarRows();rows.splice(i,1);$('#tar-grid').innerHTML=tarGridHTML(rows);};
+window.addTarifa=()=>{const rows=readTarRows(true);rows.push({});$('#tar-grid').innerHTML=tarGridHTML(rows);};
+window.delTarifa=i=>{const rows=readTarRows(true);rows.splice(i,1);$('#tar-grid').innerHTML=tarGridHTML(rows);};
 window.saveTarifas=async()=>{
   const rows=readTarRows();
   await jpost('/api/tarifas',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,carrier:TAR.carrier,rows});
@@ -393,15 +394,16 @@ function gridHTML(gid){
   }<td><button class="btn-secondary btn-sm" onclick="gridDel('${gid}',${i})">✕</button></td></tr>`).join('');
   return `<div class="card"><div class="tblwrap"><table><thead><tr>${cols.map(c=>`<th>${c.label}</th>`).join('')}<th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
-function gridReadRows(gid){
+function gridReadRows(gid, keepEmpty){
   const cols=GRIDS[gid].cols;
-  return [...document.querySelectorAll('#'+gid+' tr[data-i]')].map(tr=>{
-    const o={}; cols.forEach(c=>o[c.k]=tr.querySelector('.g-'+c.k).value); return o;
-  }).filter(o=>cols.some(c=>o[c.k]!==''&&o[c.k]!=null));
+  const rows=[...document.querySelectorAll('#'+gid+' tr[data-i]')].map(tr=>{
+    const o={}; cols.forEach(c=>{const el=tr.querySelector('.g-'+c.k); o[c.k]=el?el.value:'';}); return o;
+  });
+  return keepEmpty ? rows : rows.filter(o=>cols.some(c=>o[c.k]!==''&&o[c.k]!=null));
 }
 function gridInit(gid,cols,rows){ GRIDS[gid]={cols,rows:rows||[]}; const el=$('#'+gid); if(el)el.innerHTML=gridHTML(gid); }
-window.gridAdd=gid=>{ GRIDS[gid].rows=gridReadRows(gid); GRIDS[gid].rows.push({}); $('#'+gid).innerHTML=gridHTML(gid); };
-window.gridDel=(gid,i)=>{ const r=gridReadRows(gid); r.splice(i,1); GRIDS[gid].rows=r; $('#'+gid).innerHTML=gridHTML(gid); };
+window.gridAdd=gid=>{ GRIDS[gid].rows=gridReadRows(gid,true); GRIDS[gid].rows.push({}); $('#'+gid).innerHTML=gridHTML(gid); };
+window.gridDel=(gid,i)=>{ const r=gridReadRows(gid,true); r.splice(i,1); GRIDS[gid].rows=r; $('#'+gid).innerHTML=gridHTML(gid); };
 
 // ---- Módulo Costos (rate card + combustible) ----
 window.COSTC='dhl';
