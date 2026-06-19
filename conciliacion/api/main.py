@@ -829,42 +829,60 @@ def cobro_detalle(seller_id: int, mes: str):
         con.close()
 
 
+_CARRIER_LABEL = {"dhl": "DHL", "fedex": "FedEx", "paquete_express": "Paquete Express"}
+_COBRO_HEADERS = ["No.De Guia", "Referencia", "Producto", "Org", "Des", "Zona", "Pza", "Kilos", "kilo",
+                  "Servicio", "Fecha Envio", "Flete", "Otros costos", "Subtotal", "IVA", "Total",
+                  "Seguro", "% IVA", "Moneda", "Tipo de Cambio", "Remitente", "Destinatario"]
+
+
 @app.get("/api/cobro/seller")
 def cobro_seller(seller_id: int, mes: str):
-    """Descarga el cobro de un cliente: detalle estilo Acre (paquetería) + cobro + margen."""
+    """Excel de cobro al cliente (formato nuevo con desglose), UNA HOJA POR PAQUETERÍA.
+    Sin costo ni margen: solo el servicio + el precio a cobrar (Flete/Subtotal/IVA/Total)."""
+    from collections import OrderedDict
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
     con = db.connect()
     try:
         cliente = con.execute("SELECT any_value(cliente_real) FROM reconciliacion WHERE seller_id = ?",
                               [seller_id]).fetchone()[0] or str(seller_id)
-        # concepto del cobro: 'extra' (prepago: solo guías con extra) o 'factura' (crédito: todas).
         crow = con.execute("SELECT concepto FROM cobros WHERE seller_id=? AND mes=?", [seller_id, mes]).fetchone()
-        es_extra = bool(crow and crow[0] == "extra")
-        # Excel PARA EL CLIENTE: detalle del servicio + importe a cobrar (sin costo ni margen).
+        es_extra = bool(crow and crow[0] == "extra")          # prepago: solo guías con extra
         imp = "r.extra" if es_extra else "r.ingreso"
         filtro = "AND r.extra > 0.5" if es_extra else ""
         rows = con.execute(f"""
-            WITH carrier AS (
-                SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY guia ORDER BY fecha_factura NULLS LAST) rn
-                               FROM facturas_carrier) WHERE rn = 1)
-            SELECT fc.guia, fc.fecha_envio, fc.fecha_factura, fc.producto, fc.origen, fc.destino,
-                   fc.piezas, fc.kilos, fc.zona, round({imp},2) AS importe
+            WITH carrier AS (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY guia ORDER BY fecha_factura NULLS LAST) rn
+                             FROM facturas_carrier) WHERE rn = 1)
+            SELECT fc.carrier, fc.guia, fc.referencia, fc.producto, fc.origen, fc.destino, fc.zona,
+                   fc.piezas, fc.kilos, CAST(ceil(fc.kilos) AS INTEGER) AS kilo, fc.fecha_envio,
+                   fc.remitente, fc.destinatario, round({imp},2) AS total
             FROM reconciliacion r JOIN carrier fc ON fc.guia = r.guia
-            WHERE r.seller_id = ? AND r.mes_envio = ? {filtro} ORDER BY fc.guia""",
+            WHERE r.seller_id = ? AND r.mes_envio = ? {filtro} ORDER BY fc.carrier, fc.guia""",
             [seller_id, mes]).fetchall()
-        headers = ["Guía", "Fecha Envío", "Fecha Factura", "Producto", "Origen", "Destino",
-                   "Piezas", "Kilos", "Zona", "Importe"]
-        wb = Workbook(); ws = wb.active; ws.title = "Cobro"
-        ws.append([f"Cobro a {cliente} · {mes}"])
-        ws.append(headers)
+        iva_r = config.IVA_DEFAULT
+        bycar = OrderedDict()
         for r in rows:
-            ws.append(list(r))
-        tot_i = sum((r[9] or 0) for r in rows)
-        ws.append(["TOTAL", "", "", "", "", "", "", "", "", round(tot_i, 2)])
-        for ci in (8, 10):
-            for cell in ws[get_column_letter(ci)][2:]:
-                cell.number_format = '#,##0.00'
+            bycar.setdefault(r[0], []).append(r)
+        wb = Workbook(); wb.remove(wb.active)
+        if not bycar:
+            ws = wb.create_sheet("Cobro"); ws.append([f"Cobro a {cliente} · {mes}"]); ws.append(_COBRO_HEADERS)
+        for car, crows in bycar.items():
+            label = _CARRIER_LABEL.get(car, str(car).upper())
+            ws = wb.create_sheet(label[:31])
+            ws.append([f"Cobro a {cliente} · {mes} · {label}"])
+            ws.append(_COBRO_HEADERS)
+            tot = 0.0
+            for r in crows:
+                total = r[13] or 0.0
+                sub = round(total / (1 + iva_r), 2)
+                ivamt = round(total - sub, 2)
+                tot += total
+                ws.append([r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[3], r[10],
+                           sub, 0, sub, ivamt, round(total, 2), 0, round(iva_r * 100), "MXN", 1, r[11], r[12]])
+            ws.append(["TOTAL"] + [""] * 14 + [round(tot, 2)] + [""] * 6)
+            for ci in (12, 14, 15, 16, 17):  # Flete, Subtotal, IVA, Total, Seguro
+                for cell in ws[get_column_letter(ci)][2:]:
+                    cell.number_format = '#,##0.00'
         config.EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
         safe = "".join(ch for ch in str(cliente) if ch.isalnum() or ch in " -_")[:40].strip() or str(seller_id)
         out = config.EXPORTS_DIR / f"cobro_{safe}_{mes}.xlsx"
