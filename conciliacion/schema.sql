@@ -120,6 +120,22 @@ CREATE TABLE IF NOT EXISTS margen_kilo (
     margen    DOUBLE
 );
 
+-- Mapeo de RECARGOS por paqueteria: liga un concepto (ej. 'Zona extendida') a la columna del Acre
+-- donde viene su costo (ej. 'ODA' en FedEx). El costo del recargo se lee de esa columna por guia.
+CREATE TABLE IF NOT EXISTS recargos_mapeo (
+    carrier  VARCHAR,
+    concepto VARCHAR,
+    columna  VARCHAR
+);
+
+-- Costo de cada recargo por guia (capturado del Acre segun recargos_mapeo, al subir el archivo).
+CREATE TABLE IF NOT EXISTS factura_recargos (
+    carrier  VARCHAR,
+    guia     VARCHAR,
+    concepto VARCHAR,
+    monto    DOUBLE
+);
+
 -- Cierres de mes (snapshot del periodo).
 CREATE TABLE IF NOT EXISTS periodos (
     mes        VARCHAR,
@@ -147,6 +163,7 @@ CREATE TABLE IF NOT EXISTS reconciliacion (
     sobrepeso_cobrado DOUBLE,
     tarifa_precio     DOUBLE,
     extra             DOUBLE,
+    recargos          DOUBLE,
     ingreso           DOUBLE,
     margen            DOUBLE,
     estatus           VARCHAR,

@@ -13,7 +13,7 @@ from fastapi import FastAPI, UploadFile, File, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import config, db, ch_sync, reconcile, export, supa, pricing
+from .. import config, db, ch_sync, reconcile, export, supa, pricing, recargos
 from ..parsers import PARSERS
 from . import jobs
 
@@ -116,7 +116,9 @@ def upload_carrier(carrier: str = Query("dhl"), reset: bool = Query(False),
             if reset:
                 con.execute("DELETE FROM facturas_carrier WHERE carrier = ?", [carrier])
             n = db.insert_facturas_carrier(con, parser(str(path)))
-            return f"{n:,} lineas cargadas de {file.filename}"
+            nr = recargos.ingest_recargos(con, str(path), carrier)   # captura recargos mapeados
+            extra = f" + {nr:,} recargos" if nr else ""
+            return f"{n:,} lineas cargadas de {file.filename}{extra}"
         finally:
             con.close()
 
@@ -554,6 +556,32 @@ def save_combustible(payload: dict):
         con.close()
 
 
+# ---- Recargos: mapeo concepto -> columna del Acre (por paquetería) ----
+@app.get("/api/recargos-mapeo")
+def get_recargos_mapeo(carrier: str = "dhl"):
+    con = db.connect()
+    try:
+        return _rows(con, "SELECT concepto, columna FROM recargos_mapeo WHERE carrier=? ORDER BY concepto", [carrier])
+    finally:
+        con.close()
+
+
+@app.post("/api/recargos-mapeo")
+def save_recargos_mapeo(payload: dict):
+    carrier = payload.get("carrier", "dhl")
+    rows = payload.get("rows", [])
+    con = db.connect()
+    try:
+        con.execute("DELETE FROM recargos_mapeo WHERE carrier=?", [carrier])
+        for r in rows:
+            con.execute("INSERT INTO recargos_mapeo VALUES (?,?,?)",
+                        [carrier, (str(r.get("concepto", "")).strip() or None),
+                         (str(r.get("columna", "")).strip() or None)])
+        return {"ok": True, "filas": len(rows)}
+    finally:
+        con.close()
+
+
 # ---- Margen por zona / por kilo (métodos de cotización) ----
 @app.get("/api/margen-zona")
 def get_margen_zona(seller_id: int):
@@ -850,7 +878,8 @@ def cobro_seller(seller_id: int, mes: str):
                               [seller_id]).fetchone()[0] or str(seller_id)
         crow = con.execute("SELECT concepto FROM cobros WHERE seller_id=? AND mes=?", [seller_id, mes]).fetchone()
         es_extra = bool(crow and crow[0] == "extra")          # prepago: solo guías con extra
-        imp = "r.extra" if es_extra else "r.ingreso"
+        # la guía muestra el PRECIO BASE; los recargos (zona extendida/sobredimensión) van como líneas aparte
+        imp = "r.extra" if es_extra else "(r.ingreso - COALESCE(r.recargos,0))"
         filtro = "AND r.extra > 0.5" if es_extra else ""
         rows = con.execute(f"""
             WITH carrier AS (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY guia ORDER BY fecha_factura NULLS LAST) rn
@@ -862,6 +891,17 @@ def cobro_seller(seller_id: int, mes: str):
             WHERE r.seller_id = ? AND r.mes_envio = ? {filtro} ORDER BY fc.carrier, fc.guia""",
             [seller_id, mes]).fetchall()
         iva_r = config.IVA_DEFAULT
+        # recargos como líneas por paquetería/concepto (precio cliente = costo × (1+margen) × IVA)
+        mrow = con.execute("SELECT COALESCE(margen,0) FROM config_credito WHERE seller_id=?", [seller_id]).fetchone()
+        margen = (mrow[0] if mrow else 0) or 0
+        rec_by_car = {}
+        if not es_extra:
+            for car, concepto, costo in con.execute("""
+                SELECT fr.carrier, fr.concepto, round(sum(fr.monto),2)
+                FROM reconciliacion r JOIN factura_recargos fr ON fr.guia = r.guia
+                WHERE r.seller_id=? AND r.mes_envio=? GROUP BY fr.carrier, fr.concepto""",
+                [seller_id, mes]).fetchall():
+                rec_by_car.setdefault(car, []).append((concepto, round((costo or 0) * (1 + margen) * (1 + iva_r), 2)))
         bycar = OrderedDict()
         for r in rows:
             bycar.setdefault(r[0], []).append(r)
@@ -881,6 +921,12 @@ def cobro_seller(seller_id: int, mes: str):
                 tot += total
                 ws.append([r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[3], r[10],
                            sub, 0, sub, ivamt, round(total, 2), 0, round(iva_r * 100), "MXN", 1, r[11], r[12]])
+            for concepto, total in rec_by_car.get(car, []):     # líneas de recargo
+                if not total:
+                    continue
+                sub = round(total / (1 + iva_r), 2); ivamt = round(total - sub, 2); tot += total
+                ws.append([concepto, "", "RECARGO", "", "", "", "", "", "", "", "",
+                           sub, 0, sub, ivamt, round(total, 2), 0, round(iva_r * 100), "MXN", 1, "", ""])
             ws.append(["TOTAL"] + [""] * 14 + [round(tot, 2)] + [""] * 6)
             for ci in (12, 14, 15, 16, 17):  # Flete, Subtotal, IVA, Total, Seguro
                 for cell in ws[get_column_letter(ci)][2:]:

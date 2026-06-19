@@ -37,6 +37,9 @@ def build(con) -> int:
     precio_expr = pricing.precio_sql(
         carrier="base.carrier", zona="base.zona", kilo="base.kilos", fecha="base.fecha_envio",
         seller="base.seller_id", metodo=metodo_expr, margen="cfg.cfg_margen", servicio="base.producto")
+    iva = config.IVA_DEFAULT
+    # recargos (zona extendida/sobredimensión) al precio del cliente = costo del recargo × (1+margen) × IVA
+    recargo_precio = f"recargo_costo * (1 + COALESCE(cli_margen, 0)) * (1 + {iva})"
     sql = f"""
     CREATE OR REPLACE TABLE reconciliacion AS
     WITH carrier AS (
@@ -49,6 +52,7 @@ def build(con) -> int:
         ) WHERE rn = 1
     ),
     sob AS (SELECT guia, sum(monto) AS sobrepeso FROM ch_sobrepeso GROUP BY guia),
+    rec AS (SELECT guia, sum(monto) AS recargo_costo FROM factura_recargos GROUP BY guia),
     cfg AS (SELECT seller_id, metodo AS cobro_tipo, margen AS cfg_margen, dias_credito FROM config_credito),
     base AS (
         -- FULL OUTER: guías con costo (carrier) Y guías cobradas en sistema sin costo aún (CH).
@@ -68,11 +72,13 @@ def build(con) -> int:
             -- el retorno no se cobró en sistema: ya_cobrado = 0 → se cobra completo a costo+margen
             CASE WHEN COALESCE(c.es_retorno,false) THEN 0 ELSE s.sale_price END AS sale_price,
             ((s.guia IS NOT NULL) OR (COALESCE(c.es_retorno,false) AND rs.guia IS NOT NULL)) AS in_system,
-            COALESCE(sob.sobrepeso, 0) AS sobrepeso_cobrado
+            COALESCE(sob.sobrepeso, 0) AS sobrepeso_cobrado,
+            COALESCE(rec.recargo_costo, 0) AS recargo_costo
         FROM carrier c
         FULL OUTER JOIN ch_shipments s ON s.guia = c.guia
         LEFT JOIN ch_shipments rs ON rs.guia = c.orig_guia
         LEFT JOIN sob ON sob.guia = COALESCE(c.guia, s.guia)
+        LEFT JOIN rec ON rec.guia = COALESCE(c.guia, s.guia)
     ),
     cat AS (
         SELECT base.*,
@@ -88,6 +94,7 @@ def build(con) -> int:
             -- factor de cobro (1+margen) para EXTRAS: interno usa su pacto; resto, config o default
             CASE WHEN {internal} THEN {margin}
                  ELSE 1 + COALESCE(cfg.cfg_margen, {md}) END AS factor,
+            cfg.cfg_margen AS cli_margen,
             -- precio del cliente segun metodo (flat | margen global/zona/kilo) con fuel + IVA
             {precio_expr} AS tarifa_precio
         FROM base LEFT JOIN cfg ON cfg.seller_id = base.seller_id
@@ -95,18 +102,20 @@ def build(con) -> int:
     val AS (
         SELECT *,
             (COALESCE(sale_price,0) + sobrepeso_cobrado) AS ya_cobrado,
+            -- recargos (zona extendida/sobredimensión) al precio del cliente: SOLO en métodos manuales
+            -- (en automático/prepago el recargo ya viene en el costo real → ya cuenta en el extra).
+            CASE WHEN tipo = 'credito' AND cobro_tipo <> 'automatica' THEN {recargo_precio} ELSE 0 END AS recargo_raw,
             -- extra a cobrar (sobrepeso/retorno/desfase) = piso costo+margen menos lo ya cobrado.
-            -- crédito manual no usa extra: la tarifa por guía ya cubre re-pesos y retornos.
             CASE
                 WHEN NOT has_cost THEN 0
                 WHEN tipo = 'credito' AND cobro_tipo <> 'automatica' THEN 0
                 ELSE GREATEST(0, costo * factor - (COALESCE(sale_price,0) + sobrepeso_cobrado))
             END AS extra_raw,
-            -- ingreso devengado (lo que se debe cobrar en total por la guía)
+            -- ingreso devengado (lo que se debe cobrar en total por la guía); manual suma sus recargos
             CASE
                 WHEN NOT has_cost THEN COALESCE(sale_price,0) + sobrepeso_cobrado
                 WHEN tipo = 'interno' THEN costo * factor
-                WHEN tipo = 'credito' AND cobro_tipo <> 'automatica' THEN tarifa_precio
+                WHEN tipo = 'credito' AND cobro_tipo <> 'automatica' THEN tarifa_precio + {recargo_precio}
                 WHEN tipo IN ('credito','prepago','otro') THEN GREATEST(COALESCE(sale_price,0) + sobrepeso_cobrado, costo * factor)
                 ELSE NULL
             END AS ingreso_raw
@@ -118,6 +127,7 @@ def build(con) -> int:
         round(costo, 2) AS costo, sale_price,
         round(sobrepeso_cobrado, 2) AS sobrepeso_cobrado, tarifa_precio,
         round(extra_raw, 2) AS extra,
+        round(recargo_raw, 2) AS recargos,
         round(ingreso_raw, 2) AS ingreso,
         round(ingreso_raw - costo, 2) AS margen,
         CASE

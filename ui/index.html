@@ -423,23 +423,31 @@ views.costos=async function(){
        <div id="cost-grid"></div>
        <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('cost-grid')">+ Fila</button><button class="btn-primary" onclick="saveCostos()">Guardar costos</button></div>
      </div>
-     <div class="card" style="padding:16px">
+     <div class="card" style="padding:16px;margin-bottom:16px">
        <div style="font-weight:700;color:#1F2937;font-size:14px;margin-bottom:6px">Combustible por periodo</div>
        <div class="muted" style="font-size:12px;margin-bottom:10px">% que se suma al costo. Cada periodo es un rango de fechas (semanal o mensual).</div>
        <div id="fuel-grid"></div>
        <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('fuel-grid')">+ Periodo</button><button class="btn-primary" onclick="saveCombustible()">Guardar combustible</button></div>
+     </div>
+     <div class="card" style="padding:16px">
+       <div style="font-weight:700;color:#1F2937;font-size:14px;margin-bottom:6px">Recargos / extras</div>
+       <div class="muted" style="font-size:12px;margin-bottom:10px">Liga cada extra (zona extendida, sobredimensión…) a la <b>columna del Acre</b> donde viene su costo. Se cobra al cliente a costo × (1+margen) + IVA, como línea aparte.</div>
+       <div id="rec-grid"></div>
+       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('rec-grid')">+ Recargo</button><button class="btn-primary" onclick="saveRecargos()">Guardar recargos</button></div>
      </div>`;
   await loadCostos();
 };
 window.onCostCarrier=function(){ COSTC=$('#cost-carrier').value; loadCostos(); };
 async function loadCostos(){
-  const [cos,fue]=await Promise.all([jget('/api/costos?carrier='+encodeURIComponent(COSTC)), jget('/api/combustible?carrier='+encodeURIComponent(COSTC))]);
+  const [cos,fue,rec]=await Promise.all([jget('/api/costos?carrier='+encodeURIComponent(COSTC)), jget('/api/combustible?carrier='+encodeURIComponent(COSTC)), jget('/api/recargos-mapeo?carrier='+encodeURIComponent(COSTC))]);
   $('#cost-vd').value=((cos[0]&&cos[0].vigencia_desde)||'').slice(0,10);
   $('#cost-vh').value=((cos[0]&&cos[0].vigencia_hasta)||'').slice(0,10);
   gridInit('cost-grid',[{k:'servicio',label:'Servicio',w:160,ph:'(vacío = general)'},{k:'zona',label:'Zona',w:80},{k:'peso_min',label:'Peso min (kg)',type:'number',w:100},{k:'peso_max',label:'Peso max (kg)',type:'number',w:100},{k:'costo',label:'Costo',type:'number',w:100}],
     cos.map(r=>({servicio:r.servicio||'',zona:r.zona,peso_min:r.peso_min,peso_max:r.peso_max,costo:r.costo})));
   gridInit('fuel-grid',[{k:'vigencia_desde',label:'Desde',type:'date',w:150},{k:'vigencia_hasta',label:'Hasta',type:'date',w:150},{k:'pct',label:'% combustible',type:'number',w:110}],
     fue.map(r=>({vigencia_desde:(r.vigencia_desde||'').slice(0,10),vigencia_hasta:(r.vigencia_hasta||'').slice(0,10),pct:r.pct!=null?+(r.pct*100).toFixed(2):''})));
+  gridInit('rec-grid',[{k:'concepto',label:'Concepto',w:200,ph:'Zona extendida'},{k:'columna',label:'Columna del Acre',w:200,ph:'ODA'}],
+    rec.map(r=>({concepto:r.concepto||'',columna:r.columna||''})));
 }
 window.saveCostos=async function(){
   const rows=gridReadRows('cost-grid');
@@ -450,6 +458,11 @@ window.saveCombustible=async function(){
   const rows=gridReadRows('fuel-grid').map(r=>({vigencia_desde:r.vigencia_desde||null,vigencia_hasta:r.vigencia_hasta||null,pct:r.pct===''?null:Number(r.pct)/100}));
   const r=await jpost('/api/combustible',{carrier:COSTC,rows});
   $('#job').innerHTML=`<span class="dot ok"></span>combustible ${carLbl(COSTC)} guardado (${r.filas})`;
+};
+window.saveRecargos=async function(){
+  const rows=gridReadRows('rec-grid');
+  const r=await jpost('/api/recargos-mapeo',{carrier:COSTC,rows});
+  $('#job').innerHTML=`<span class="dot ok"></span>recargos ${carLbl(COSTC)} guardados (${r.filas})`;
 };
 // ---- editores de margen por zona / kilo + preview ----
 async function loadMargenZona(){
