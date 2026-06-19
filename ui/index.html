@@ -405,8 +405,14 @@ function gridInit(gid,cols,rows){ GRIDS[gid]={cols,rows:rows||[]}; const el=$('#
 window.gridAdd=gid=>{ GRIDS[gid].rows=gridReadRows(gid,true); GRIDS[gid].rows.push({}); $('#'+gid).innerHTML=gridHTML(gid); };
 window.gridDel=(gid,i)=>{ const r=gridReadRows(gid,true); r.splice(i,1); GRIDS[gid].rows=r; $('#'+gid).innerHTML=gridHTML(gid); };
 
-// ---- Módulo Costos (rate card + combustible) ----
+// ---- Módulo Costos (rate card + combustible + recargos) ----
 window.COSTC='dhl';
+// Sugerencias de recargos por paquetería (columna del Acre identificada). Se pre-cargan si no hay mapeo.
+const RECARGOS_SUG={
+  dhl:[{concepto:'Zona extendida',columna:'OO'},{concepto:'Sobredimensión',columna:'YB'},{concepto:'Sobrepeso',columna:'YY'},{concepto:'Multipieza',columna:'YE'}],
+  fedex:[{concepto:'Zona extendida',columna:'ODA'},{concepto:'Zona extendida',columna:'OPA'},{concepto:'Sobredimensión',columna:'Oversize_Charge'}],
+  paquete_express:[{concepto:'Otros cargos',columna:'Otros'}],
+};
 views.costos=async function(){
   const copts=CARRIERS.map(c=>`<option value="${c}" ${c===COSTC?'selected':''}>${carLbl(c)}</option>`).join('');
   $('#view').innerHTML=toolbar('Costos (paqueterías)','Rate card de costo por zona/kilo, combustible por periodo e IVA. De aquí derivan las tarifas por cliente.') +
@@ -447,7 +453,7 @@ async function loadCostos(){
   gridInit('fuel-grid',[{k:'vigencia_desde',label:'Desde',type:'date',w:150},{k:'vigencia_hasta',label:'Hasta',type:'date',w:150},{k:'pct',label:'% combustible',type:'number',w:110}],
     fue.map(r=>({vigencia_desde:(r.vigencia_desde||'').slice(0,10),vigencia_hasta:(r.vigencia_hasta||'').slice(0,10),pct:r.pct!=null?+(r.pct*100).toFixed(2):''})));
   gridInit('rec-grid',[{k:'concepto',label:'Concepto',w:200,ph:'Zona extendida'},{k:'columna',label:'Columna del Acre',w:200,ph:'ODA'}],
-    rec.map(r=>({concepto:r.concepto||'',columna:r.columna||''})));
+    rec.length ? rec.map(r=>({concepto:r.concepto||'',columna:r.columna||''})) : (RECARGOS_SUG[COSTC]||[]).map(r=>({concepto:r.concepto,columna:r.columna})));
 }
 window.saveCostos=async function(){
   const rows=gridReadRows('cost-grid');
