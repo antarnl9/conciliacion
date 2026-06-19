@@ -38,6 +38,7 @@ ClickHouse fct_shipments + fct_wallet_transactions --sync--> ch_shipments / ch_s
   - `costos_tarifa` (carrier, **servicio**, zona×kilo → costo; **vigencia global** por versión; servicio vacío = tarifa general/fallback) · `combustible` (carrier, % por periodo: semanal o mensual) · IVA = `config.IVA_DEFAULT` (16%).
   - El **servicio** de la guía = su `producto` (DHL 'G'/'N', FedEx 'Express Saver', Paquete Express 'Standard'); el costo se busca por servicio (exacto > general).
   - `precio = costo(servicio,zona,kilo,vigente) × (1+combustible_del_periodo) × (1+margen) × (1+IVA)`. `flat` ignora costo/fuel: `precio_fijo × (1+IVA)`.
+  - **Recargos** (zona extendida, sobredimensión…): `recargos_mapeo` liga un concepto a la **columna del Acre** donde viene su costo (ej. FedEx `ODA`). Al subir el Acre, `recargos.py` captura el costo por guía en `factura_recargos`. El reconcile suma `recargo × (1 + margen_cliente) × (1+IVA)` al ingreso **solo en métodos manuales** (en automático/prepago ya van en el costo real). En el cobro salen como **línea por concepto** (la guía muestra el precio base). Si el cliente no tiene margen → recargo a costo.
   - Margen según método: `margen_global` (config_credito.margen), `margen_zona` (tabla `margen_zona`), `margen_kilo` (tabla `margen_kilo`).
   - **Preview** (`/api/tarifa-preview`): muestra la matriz resultante por cliente para validar antes de cerrar. OJO: el alias externo del preview es `cc` (no `ct`) para no chocar con los alias internos de `pricing.precio_sql`.
   - `'manual'` (config vieja) se normaliza a `'flat'`.
