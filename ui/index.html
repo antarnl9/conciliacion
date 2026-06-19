@@ -93,6 +93,16 @@
   .crow.off{opacity:.4}
   .crow .fname{font-size:11.5px;color:var(--green-700);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .cm-chk{accent-color:var(--red-500);width:15px;height:15px;cursor:pointer}
+  .plist{display:flex;flex-direction:column}
+  .pstep{display:flex;align-items:center;gap:11px;padding:10px 2px;border-bottom:1px solid var(--gray-100);font-size:13.5px;color:var(--gray-600)}
+  .pstep .pic{width:19px;height:19px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;border:2px solid var(--gray-200);box-sizing:border-box}
+  .pstep.run{color:var(--oxford);font-weight:600}
+  .pstep.run .pic{border-color:var(--red-500);border-top-color:transparent;animation:spin .7s linear infinite}
+  .pstep.done{color:var(--oxford)}
+  .pstep.done .pic{background:var(--green-700);border-color:var(--green-700);color:#fff}
+  .pstep.err{color:var(--red-700)} .pstep.err .pic{background:var(--red-700);border-color:var(--red-700);color:#fff}
+  .pstep .pex{margin-left:auto;font-size:11.5px;color:var(--gray-600);font-weight:400;text-align:right}
+  @keyframes spin{to{transform:rotate(360deg)}}
   .login-ov{position:fixed;inset:0;background:#f3f5f8;display:none;align-items:center;justify-content:center;z-index:1000}
   .login-ov.show{display:flex}
   .login-card{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:34px 30px;width:340px;box-shadow:0 12px 44px rgba(0,0,0,.10)}
@@ -140,22 +150,8 @@
 <div class="modal-overlay" id="modal">
   <div class="modal">
     <div class="modal-head"><h3 id="cm-title">Cierre de mes</h3><button class="x" onclick="closeModal()">✕</button></div>
-    <div class="modal-body">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--blue-100);border:1px solid var(--gray-200);border-radius:9px;padding:11px 13px;margin-bottom:18px">
-        <div><div style="font-weight:600;color:var(--oxford);font-size:13px">Datos del sistema</div>
-          <div class="muted" style="font-size:11.5px">Trae los envíos y cobros más recientes del sistema. Hazlo antes de cerrar.</div></div>
-        <button class="btn-secondary btn-sm" id="b-sync" onclick="syncCH()" style="white-space:nowrap">Sincronizar</button>
-      </div>
-      <label class="lblform">Mes a cerrar</label>
-      <input type="month" id="cm-mes" style="width:100%;margin-bottom:18px">
-      <label class="lblform">Archivos de paqueterías</label>
-      <div class="muted" style="font-size:12px;margin-bottom:8px">Deselecciona las paqueterías que no apliquen para este cierre. Sube el Excel de cada una.</div>
-      <div id="cm-carriers"></div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn-primary" id="cm-proc" onclick="procesarCierre()" disabled>Procesar cierre</button>
-    </div>
+    <div class="modal-body" id="cm-body"></div>
+    <div class="modal-foot" id="cm-foot"></div>
   </div>
 </div>
 
@@ -418,8 +414,21 @@ const SUPPORTED=['dhl'];
 window.openCierreModal=async function(mes){
   const meses=await jget('/api/cierre/meses');
   const m=mes||(meses.find(x=>x.estatus!=='cerrado')||meses[0]||{}).mes||'';
-  $('#cm-mes').value=m;
   $('#cm-title').textContent = mes ? `Editar cierre · ${mes}` : 'Cierre de mes';
+  $('#cm-body').innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--blue-100);border:1px solid var(--gray-200);border-radius:9px;padding:11px 13px;margin-bottom:18px">
+      <div><div style="font-weight:600;color:var(--oxford);font-size:13px">Datos del sistema</div>
+        <div class="muted" style="font-size:11.5px">Trae los envíos y cobros más recientes del sistema. Hazlo antes de cerrar.</div></div>
+      <button class="btn-secondary btn-sm" id="b-sync" onclick="syncCH()" style="white-space:nowrap">Sincronizar</button>
+    </div>
+    <label class="lblform">Mes a cerrar</label>
+    <input type="month" id="cm-mes" style="width:100%;margin-bottom:18px">
+    <label class="lblform">Archivos de paqueterías</label>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Deselecciona las paqueterías que no apliquen para este cierre. Sube el Excel de cada una.</div>
+    <div id="cm-carriers"></div>`;
+  $('#cm-foot').innerHTML=`<button class="btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn-primary" id="cm-proc" onclick="procesarCierre()" disabled>Procesar cierre</button>`;
+  $('#cm-mes').value=m;
   $('#cm-carriers').innerHTML=CARRIERS.map(c=>{
     const sup=SUPPORTED.includes(c);
     return `<div class="crow${sup?'':' off'}" data-c="${c}">
@@ -502,26 +511,56 @@ window.cmFile=c=>{const fi=document.querySelector(`.cm-file[data-c="${c}"]`);
   updateCierreCount();};
 async function waitIdle(){for(let i=0;i<800;i++){const s=await jget('/api/status');
   if(!Object.values(s.jobs||{}).some(j=>j.status==='running'))return; await new Promise(r=>setTimeout(r,1500));}}
+function lastJobMsg(){ return jget('/api/status').then(s=>{
+  const f=Object.values(s.jobs||{}).filter(j=>j.status!=='running')
+    .sort((a,b)=>(b.finished||'').localeCompare(a.finished||''))[0];
+  return f?(f.message||'').split('\n')[0]:''; }); }
+
 window.procesarCierre=async function(){
   const mes=$('#cm-mes').value; if(!mes){alert('Selecciona el mes a cerrar');return;}
   const sel=[...document.querySelectorAll('.cm-chk')].filter(c=>c.checked).map(c=>c.dataset.c)
     .filter(c=>{const fi=document.querySelector(`.cm-file[data-c="${c}"]`);return fi&&fi.files[0];});
   if(!sel.length){alert('Sube al menos un Excel de paquetería (y deja seleccionadas solo las que apliquen).');return;}
-  closeModal();
-  for(const c of sel){
-    const fi=document.querySelector(`.cm-file[data-c="${c}"]`);
-    const fd=new FormData(); fd.append('file',fi.files[0]);
-    $('#job').innerHTML=`<span class="dot run"></span>subiendo ${c.toUpperCase()}…`;
-    const r=await fetch(`/api/upload/carrier?carrier=${c}&reset=true`,{method:'POST',body:fd}).then(x=>x.json()).catch(()=>({error:'fallo subida'}));
-    if(r&&r.error){$('#job').innerHTML=`<span class="dot err"></span>${c.toUpperCase()}: ${r.error}`;}
-    await waitIdle();
-  }
-  $('#job').innerHTML=`<span class="dot run"></span>reconciliando…`; await jpost('/api/reconcile'); await waitIdle();
-  await jpost('/api/cierre/cerrar?mes='+mes);
-  $('#job').innerHTML=`<span class="dot run"></span>generando cobro de crédito…`; await jpost('/api/cobro/generar?mes='+mes);
-  $('#job').innerHTML=`<span class="dot ok"></span>cierre de ${mes} listo`;
-  if(VIEW==='cierre')views.cierre(); else go('cierre');
+  const files={}; sel.forEach(c=>files[c]=document.querySelector(`.cm-file[data-c="${c}"]`).files[0]);
+  const steps=[...sel.map(c=>({k:'up-'+c,label:'Subir '+c.toUpperCase()})),
+    {k:'rec',label:'Reconciliar guías'},{k:'cls',label:'Cerrar mes'},{k:'cob',label:'Generar cobro'}];
+  $('#cm-title').textContent='Procesando cierre · '+mes;
+  $('#cm-body').innerHTML=`<div class="plist">${steps.map(s=>
+    `<div class="pstep" id="st-${s.k}"><span class="pic"></span><span>${s.label}</span><span class="pex"></span></div>`).join('')}</div>
+    <div id="cm-summary" style="margin-top:16px"></div>`;
+  $('#cm-foot').innerHTML=`<button class="btn-secondary" id="cm-close" onclick="closeModal()" disabled>Procesando…</button>`;
+  const setStep=(k,st,ex)=>{const el=$('#st-'+k);if(!el)return;el.className='pstep '+st;
+    el.querySelector('.pic').textContent=st==='done'?'✓':st==='err'?'✕':'';
+    if(ex)el.querySelector('.pex').textContent=ex;};
+  try{
+    for(const c of sel){ setStep('up-'+c,'run');
+      const fd=new FormData(); fd.append('file',files[c]);
+      const r=await fetch(`/api/upload/carrier?carrier=${c}&reset=true`,{method:'POST',body:fd}).then(x=>x.json()).catch(()=>({error:'fallo subida'}));
+      if(r&&r.error){setStep('up-'+c,'err',r.error); return finishProgress(mes,false);}
+      await waitIdle(); setStep('up-'+c,'done', await lastJobMsg());
+    }
+    setStep('rec','run'); await jpost('/api/reconcile'); await waitIdle(); setStep('rec','done', await lastJobMsg());
+    setStep('cls','run'); const cl=await jpost('/api/cierre/cerrar?mes='+mes);
+    setStep('cls','done', `costo $${fmt(cl.costo)} · ingreso $${fmt(cl.ingreso)}`);
+    setStep('cob','run'); const cb=await jpost('/api/cobro/generar?mes='+mes);
+    setStep('cob','done', `${cb.sellers} clientes · $${fmt(cb.monto_total)}`);
+    finishProgress(mes,true,cl,cb);
+  }catch(e){ finishProgress(mes,false); }
 };
+function finishProgress(mes,ok,cl,cb){
+  const b=$('#cm-close'); if(b){b.disabled=false;b.textContent='Cerrar';}
+  if(VIEW==='cierre')views.cierre();
+  if(ok){
+    $('#cm-summary').innerHTML=`<div style="background:#F4FBF6;border:1px solid var(--gray-200);border-radius:9px;padding:13px">
+      <div style="font-weight:700;color:var(--green-700);margin-bottom:5px">✓ Cierre de ${mes} listo</div>
+      <div style="font-size:12.5px;color:var(--oxford);line-height:1.55">
+        Costo $${fmt(cl&&cl.costo)} · Ingreso $${fmt(cl&&cl.ingreso)} · Utilidad $${fmt(cl&&cl.utilidad)}<br>
+        Cobro generado: ${cb?cb.sellers:0} clientes · $${fmt(cb&&cb.monto_total)}</div>
+      <button class="btn-primary btn-sm" style="margin-top:10px" onclick="closeModal();openDetalleMes('${mes}')">Ver detalle del cierre</button></div>`;
+  }else{
+    $('#cm-summary').innerHTML=`<div style="color:var(--red-700);font-size:13px;font-weight:600">Algo falló. Revisa el paso marcado y reintenta.</div>`;
+  }
+}
 
 // router
 const ROUTER={cierre:()=>views.cierre(),'cobranza':()=>views.cobranza(),'tarifas':()=>views.tarifas(),
