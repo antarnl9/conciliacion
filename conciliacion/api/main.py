@@ -498,10 +498,29 @@ _METODOS = {"automatica", "margen_global", "margen_zona", "margen_kilo", "flat"}
 
 
 # ---- Módulo Costos: rate card de la paquetería ----
-@app.get("/api/costos")
-def get_costos(carrier: str = "dhl"):
+@app.get("/api/servicios")
+def get_servicios(carrier: str = "dhl"):
+    """Tipos de servicio REALES de la paquetería (del `producto` de los Acres subidos + lo ya configurado).
+    Así la tarifa se liga al servicio tal cual viene en el Acre, sin teclearlo."""
     con = db.connect()
     try:
+        rows = con.execute("""
+            SELECT producto AS s FROM facturas_carrier WHERE carrier=? AND producto IS NOT NULL AND producto<>''
+            UNION SELECT servicio FROM costos_tarifa WHERE carrier=? AND servicio IS NOT NULL AND servicio<>''
+            ORDER BY s""", [carrier, carrier]).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        con.close()
+
+
+@app.get("/api/costos")
+def get_costos(carrier: str = "dhl", servicio: str = ""):
+    con = db.connect()
+    try:
+        if servicio:
+            return _rows(con, """SELECT servicio, zona, peso_min, peso_max, costo, vigencia_desde, vigencia_hasta
+                                 FROM costos_tarifa WHERE carrier=? AND COALESCE(servicio,'')=? ORDER BY zona, peso_min""",
+                         [carrier, servicio])
         return _rows(con, """SELECT servicio, zona, peso_min, peso_max, costo, vigencia_desde, vigencia_hasta
                              FROM costos_tarifa WHERE carrier=? ORDER BY servicio, zona, peso_min""", [carrier])
     finally:
@@ -510,19 +529,21 @@ def get_costos(carrier: str = "dhl"):
 
 @app.post("/api/costos")
 def save_costos(payload: dict):
-    """Reemplaza el rate card de una paquetería (vigencia global para toda la matriz)."""
+    """Reemplaza el rate card de UN servicio de una paquetería (vigencia global)."""
     carrier = payload.get("carrier", "dhl")
+    servicio = (str(payload.get("servicio", "")).strip() or None)
     vd = payload.get("vigencia_desde") or None
     vh = payload.get("vigencia_hasta") or None
     rows = payload.get("rows", [])
     con = db.connect()
     try:
-        con.execute("DELETE FROM costos_tarifa WHERE carrier=?", [carrier])
+        con.execute("DELETE FROM costos_tarifa WHERE carrier=? AND COALESCE(servicio,'')=COALESCE(?,'')",
+                    [carrier, servicio])
         for r in rows:
             con.execute("""INSERT INTO costos_tarifa
                 (carrier, servicio, zona, peso_min, peso_max, costo, vigencia_desde, vigencia_hasta)
                 VALUES (?,?,?,?,?,?,?,?)""",
-                [carrier, (str(r.get("servicio", "")).strip() or None), str(r.get("zona", "")).strip(),
+                [carrier, servicio, str(r.get("zona", "")).strip(),
                  _f(r.get("peso_min")), _f(r.get("peso_max")), _f(r.get("costo")), vd, vh])
         return {"ok": True, "filas": len(rows)}
     finally:

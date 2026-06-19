@@ -119,6 +119,9 @@
   .seg button:not(.active):hover{background:var(--blue-100)}
   .cfgrow{display:flex;align-items:flex-end;gap:26px;flex-wrap:wrap}
   .cfgrow .lblform{margin-bottom:7px}
+  .seg-tab{border:1px solid var(--gray-200);background:#fff;padding:6px 13px;border-radius:8px;font-size:12.5px;color:var(--gray-700);cursor:pointer;margin:0 6px 6px 0;font-family:inherit}
+  .seg-tab.active{background:var(--red-500);color:#fff;border-color:var(--red-500);font-weight:600}
+  .seg-tab:not(.active):hover{background:var(--blue-100)}
   tr.overdue td{background:var(--red-50)}
   .login-ov{position:fixed;inset:0;background:#f3f5f8;display:none;align-items:center;justify-content:center;z-index:1000}
   .login-ov.show{display:flex}
@@ -405,8 +408,9 @@ function gridInit(gid,cols,rows){ GRIDS[gid]={cols,rows:rows||[]}; const el=$('#
 window.gridAdd=gid=>{ GRIDS[gid].rows=gridReadRows(gid,true); GRIDS[gid].rows.push({}); $('#'+gid).innerHTML=gridHTML(gid); };
 window.gridDel=(gid,i)=>{ const r=gridReadRows(gid,true); r.splice(i,1); GRIDS[gid].rows=r; $('#'+gid).innerHTML=gridHTML(gid); };
 
-// ---- Módulo Costos (rate card + combustible + recargos) ----
-window.COSTC='dhl';
+// ---- Módulo Costos (rate card por servicio + combustible + recargos) ----
+window.COSTC='dhl'; window.COSTSVCS=[]; window.COSTSVC='';
+const enc=encodeURIComponent;
 // Sugerencias de recargos por paquetería (columna del Acre identificada). Se pre-cargan si no hay mapeo.
 const RECARGOS_SUG={
   dhl:[{concepto:'Zona extendida',columna:'OO'},{concepto:'Sobredimensión',columna:'YB'},{concepto:'Sobrepeso',columna:'YY'},{concepto:'Multipieza',columna:'YE'}],
@@ -420,14 +424,16 @@ views.costos=async function(){
        <span class="muted" style="margin-left:18px">IVA aplicado:</span><span style="font-weight:700;color:var(--oxford)">${Math.round(IVA*100)}%</span></div>
      <div class="card" style="padding:16px;margin-bottom:16px">
        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:12px;flex-wrap:wrap">
-         <div style="font-weight:700;color:#1F2937;font-size:14px">Tarifa de costo (rate card) · vigencia global</div>
+         <div style="font-weight:700;color:#1F2937;font-size:14px">Tarifa de costo por servicio · vigencia global</div>
          <div style="display:flex;gap:16px;align-items:flex-end">
            <div><span class="lblform">Vigencia desde</span><input type="date" id="cost-vd"></div>
            <div><span class="lblform">Vigencia hasta</span><input type="date" id="cost-vh"></div>
          </div>
        </div>
+       <div class="muted" style="font-size:12px;margin-bottom:8px">Elige el <b>tipo de servicio</b> (vienen del Acre, tal cual) y captura su tarifa zona/kilo.</div>
+       <div id="svc-tabs" style="margin-bottom:10px"></div>
        <div id="cost-grid"></div>
-       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('cost-grid')">+ Fila</button><button class="btn-primary" onclick="saveCostos()">Guardar costos</button></div>
+       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('cost-grid')">+ Fila</button><button class="btn-primary" onclick="saveCostos()">Guardar tarifa del servicio</button></div>
      </div>
      <div class="card" style="padding:16px;margin-bottom:16px">
        <div style="font-weight:700;color:#1F2937;font-size:14px;margin-bottom:6px">Combustible por periodo</div>
@@ -443,22 +449,41 @@ views.costos=async function(){
      </div>`;
   await loadCostos();
 };
-window.onCostCarrier=function(){ COSTC=$('#cost-carrier').value; loadCostos(); };
+window.onCostCarrier=function(){ COSTC=$('#cost-carrier').value; COSTSVC=''; loadCostos(); };
+function renderSvcTabs(){
+  const tabs=COSTSVCS.map((s,i)=>`<button class="seg-tab ${s===COSTSVC?'active':''}" onclick="selSvc(${i})">${s}</button>`).join('');
+  $('#svc-tabs').innerHTML=(COSTSVCS.length?tabs:`<span class="muted" style="font-size:12.5px">Sin servicios aún — sube un Acre de ${carLbl(COSTC)} para ver sus tipos de servicio. </span>`)
+    +`<button class="btn-secondary btn-sm" onclick="addSvc()">+ servicio manual</button>`;
+}
+window.selSvc=async function(i){ COSTSVC=COSTSVCS[i]; renderSvcTabs(); await loadCostoSvc(); };
+window.addSvc=function(){
+  const s=(prompt('Nombre del servicio — debe coincidir EXACTO con el Acre (columna Producto/Servicio):')||'').trim();
+  if(!s)return; if(!COSTSVCS.includes(s))COSTSVCS.push(s); COSTSVC=s; renderSvcTabs(); loadCostoSvc();
+};
+async function loadCostoSvc(){
+  const cos=COSTSVC?await jget(`/api/costos?carrier=${enc(COSTC)}&servicio=${enc(COSTSVC)}`):[];
+  gridInit('cost-grid',[{k:'zona',label:'Zona',w:90},{k:'peso_min',label:'Peso min (kg)',type:'number',w:100},{k:'peso_max',label:'Peso max (kg)',type:'number',w:100},{k:'costo',label:'Costo',type:'number',w:100}],
+    cos.map(r=>({zona:r.zona,peso_min:r.peso_min,peso_max:r.peso_max,costo:r.costo})));
+}
 async function loadCostos(){
-  const [cos,fue,rec]=await Promise.all([jget('/api/costos?carrier='+encodeURIComponent(COSTC)), jget('/api/combustible?carrier='+encodeURIComponent(COSTC)), jget('/api/recargos-mapeo?carrier='+encodeURIComponent(COSTC))]);
-  $('#cost-vd').value=((cos[0]&&cos[0].vigencia_desde)||'').slice(0,10);
-  $('#cost-vh').value=((cos[0]&&cos[0].vigencia_hasta)||'').slice(0,10);
-  gridInit('cost-grid',[{k:'servicio',label:'Servicio',w:160,ph:'(vacío = general)'},{k:'zona',label:'Zona',w:80},{k:'peso_min',label:'Peso min (kg)',type:'number',w:100},{k:'peso_max',label:'Peso max (kg)',type:'number',w:100},{k:'costo',label:'Costo',type:'number',w:100}],
-    cos.map(r=>({servicio:r.servicio||'',zona:r.zona,peso_min:r.peso_min,peso_max:r.peso_max,costo:r.costo})));
+  const [svcs,cosAll,fue,rec]=await Promise.all([
+    jget('/api/servicios?carrier='+enc(COSTC)), jget('/api/costos?carrier='+enc(COSTC)),
+    jget('/api/combustible?carrier='+enc(COSTC)), jget('/api/recargos-mapeo?carrier='+enc(COSTC))]);
+  COSTSVCS=svcs||[]; if(!COSTSVC||!COSTSVCS.includes(COSTSVC)) COSTSVC=COSTSVCS[0]||'';
+  $('#cost-vd').value=((cosAll[0]&&cosAll[0].vigencia_desde)||'').slice(0,10);
+  $('#cost-vh').value=((cosAll[0]&&cosAll[0].vigencia_hasta)||'').slice(0,10);
+  renderSvcTabs(); await loadCostoSvc();
   gridInit('fuel-grid',[{k:'vigencia_desde',label:'Desde',type:'date',w:150},{k:'vigencia_hasta',label:'Hasta',type:'date',w:150},{k:'pct',label:'% combustible',type:'number',w:110}],
     fue.map(r=>({vigencia_desde:(r.vigencia_desde||'').slice(0,10),vigencia_hasta:(r.vigencia_hasta||'').slice(0,10),pct:r.pct!=null?+(r.pct*100).toFixed(2):''})));
   gridInit('rec-grid',[{k:'concepto',label:'Concepto',w:200,ph:'Zona extendida'},{k:'columna',label:'Columna del Acre',w:200,ph:'ODA'}],
     rec.length ? rec.map(r=>({concepto:r.concepto||'',columna:r.columna||''})) : (RECARGOS_SUG[COSTC]||[]).map(r=>({concepto:r.concepto,columna:r.columna})));
 }
 window.saveCostos=async function(){
+  if(!COSTSVC){alert('Elige o agrega un servicio primero (las pestañas vienen del Acre).');return;}
   const rows=gridReadRows('cost-grid');
-  const r=await jpost('/api/costos',{carrier:COSTC,vigencia_desde:$('#cost-vd').value||null,vigencia_hasta:$('#cost-vh').value||null,rows});
-  $('#job').innerHTML=`<span class="dot ok"></span>costos ${carLbl(COSTC)} guardados (${r.filas})`;
+  const r=await jpost('/api/costos',{carrier:COSTC,servicio:COSTSVC,vigencia_desde:$('#cost-vd').value||null,vigencia_hasta:$('#cost-vh').value||null,rows});
+  $('#job').innerHTML=`<span class="dot ok"></span>tarifa ${carLbl(COSTC)} · ${COSTSVC} (${r.filas})`;
+  if(!COSTSVCS.includes(COSTSVC)){COSTSVCS.push(COSTSVC);renderSvcTabs();}
 };
 window.saveCombustible=async function(){
   const rows=gridReadRows('fuel-grid').map(r=>({vigencia_desde:r.vigencia_desde||null,vigencia_hasta:r.vigencia_hasta||null,pct:r.pct===''?null:Number(r.pct)/100}));
