@@ -112,6 +112,13 @@
   .dkpi{display:flex;gap:22px;flex-wrap:wrap;background:var(--blue-100);border:1px solid var(--gray-200);border-radius:9px;padding:13px 16px;margin-bottom:16px}
   .dkpi .b{font-size:11px;color:var(--gray-600);text-transform:uppercase;letter-spacing:.03em}
   .dkpi .v{font-size:16px;font-weight:700;color:var(--heading,#1F2937)}
+  .seg{display:inline-flex;border:1px solid var(--gray-200);border-radius:9px;overflow:hidden}
+  .seg button{border:none;background:#fff;padding:9px 16px;font-size:13px;color:var(--gray-700);cursor:pointer;font-family:inherit;white-space:nowrap}
+  .seg button+button{border-left:1px solid var(--gray-200)}
+  .seg button.active{background:var(--red-500);color:#fff;font-weight:600}
+  .seg button:not(.active):hover{background:var(--blue-100)}
+  .cfgrow{display:flex;align-items:flex-end;gap:26px;flex-wrap:wrap}
+  .cfgrow .lblform{margin-bottom:7px}
   .login-ov{position:fixed;inset:0;background:#f3f5f8;display:none;align-items:center;justify-content:center;z-index:1000}
   .login-ov.show{display:flex}
   .login-card{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:34px 30px;width:340px;box-shadow:0 12px 44px rgba(0,0,0,.10)}
@@ -235,16 +242,22 @@ const views = {
     window.TARCLI = cls;
     const opts = cls.map(c=>`<option value="${c.seller_id}">${c.cliente} · ${c.filas_tarifa} tarifas</option>`).join('');
     $('#view').innerHTML = toolbar('Configuración de tarifas','Por cliente de crédito: cobro automático (del sistema) o manual (tarifa por paquetería, zona y kilo)') +
-      `<div class="filters">
-         <span class="muted">Cliente:</span>
-         <select id="t-cliente" style="min-width:300px" onchange="onCliente()">${opts}</select>
-         <span class="muted" style="margin-left:16px">Cobro:</span>
-         <label style="font-size:13px;color:var(--oxford)"><input type="radio" name="cobro" value="automatica" onchange="setCobro('automatica')"> Automático (del sistema)</label>
-         <label style="font-size:13px;color:var(--oxford);margin-left:6px"><input type="radio" name="cobro" value="manual" onchange="setCobro('manual')"> Manual (tarifa)</label>
-         <span class="muted" style="margin-left:16px" title="Margen para extras (sobrepeso/retornos/desfase): piso = costo×(1+margen)">Margen %:</span>
-         <input id="t-margen" type="number" step="1" placeholder="14" style="width:64px" onchange="setMargen()">
-         <span class="muted" style="margin-left:10px" title="Plazo de pago para vencimiento y días de atraso">Días crédito:</span>
-         <input id="t-dias" type="number" step="1" placeholder="30" style="width:64px" onchange="setDias()">
+      `<div class="filters"><span class="muted">Cliente:</span>
+         <select id="t-cliente" style="min-width:340px" onchange="onCliente()">${opts}</select></div>
+       <div class="card" style="padding:18px;margin-bottom:16px">
+         <div class="cfgrow">
+           <div>
+             <span class="lblform">Tipo de cobro</span>
+             <div class="seg" id="t-cobro">
+               <button data-v="automatica" onclick="setCobro('automatica')">Automático (del sistema)</button>
+               <button data-v="manual" onclick="setCobro('manual')">Manual (tarifa)</button>
+             </div>
+           </div>
+           <div><span class="lblform" title="Margen para extras: piso = costo×(1+margen)">Margen % (extras)</span>
+             <input id="t-margen" type="number" step="1" placeholder="14" style="width:96px" onchange="setMargen()"></div>
+           <div><span class="lblform">Días de crédito</span>
+             <input id="t-dias" type="number" step="1" placeholder="30" style="width:96px" onchange="setDias()"></div>
+         </div>
        </div>
        <div id="tar-body"></div>`;
     onCliente();
@@ -283,18 +296,18 @@ const views = {
 const CARRIERS=['dhl','fedex','ups','ampm','t1envios','paqueteria express','99min','estafeta','redpack'];
 window.TAR={seller_id:null,cliente:null,cobro:'automatica',carrier:'dhl'};
 function curCli(){const s=$('#t-cliente');if(!s||!s.value)return null;return (window.TARCLI||[]).find(c=>String(c.seller_id)===s.value);}
+function setSeg(v){document.querySelectorAll('#t-cobro button').forEach(b=>b.classList.toggle('active',b.dataset.v===v));}
 window.onCliente=function(){
   const c=curCli(); if(!c){$('#tar-body').innerHTML='';return;}
   TAR.seller_id=c.seller_id; TAR.cliente=c.cliente; TAR.cobro=c.cobro_tipo||'automatica';
-  document.querySelectorAll('input[name=cobro]').forEach(r=>r.checked=(r.value===TAR.cobro));
+  setSeg(TAR.cobro);
   const mg=$('#t-margen'); if(mg)mg.value=(c.margen!=null?Math.round(c.margen*100):'');
   const dc=$('#t-dias'); if(dc)dc.value=(c.dias_credito!=null?c.dias_credito:'');
   renderTarBody();
 };
 window.setCobro=async function(v){
-  TAR.cobro=v;
-  await jpost('/api/cliente/cobro',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,cobro_tipo:v});
-  renderTarBody();
+  TAR.cobro=v; setSeg(v); renderTarBody();      // UI primero: el formulario aparece de inmediato
+  try{ await jpost('/api/cliente/cobro',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,cobro_tipo:v}); }catch(e){}
 };
 window.setMargen=async function(){
   const v=$('#t-margen').value;
