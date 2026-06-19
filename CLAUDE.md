@@ -100,7 +100,18 @@ $PY -m pytest tests/ -q
 - F4 API FastAPI + UI web (`conciliacion/api/` + `ui/index.html`): subir archivos, sync, conciliar, KPIs y tablas ✅. Levantar: `.venv/bin/uvicorn conciliacion.api.main:app --port 8770`.
 - F5 Modelo de cobranza: extras con margen, factura por tipo de cliente, libro de cuentas por cobrar (cobros/pagos, enviar/pagar/vencimiento), retornos atribuidos ✅
 - F6 Despliegue: GitHub + Railway (Docker + volumen) + Supabase (Auth + Storage) ✅ (ver §9)
-- F7 Multi-carrier (FedEx/UPS/AMPM/Estafeta…) + alertas — pendiente.
+- F7 Multi-carrier: **DHL + FedEx + Paquete Express** ✅ (UPS/AMPM/Estafeta… pendientes) + alertas — pendiente.
+
+### Paqueterías soportadas (parsers + cruce)
+| Carrier (key) | `carrier_name` en CH | Llave de cruce (columna del archivo) | Costo (importe_neto) |
+|---|---|---|---|
+| `dhl` | `DHL` | `No.De Guia` | `Importe Neto` |
+| `fedex` | `FEDEX` | `Guia` (cruza 97.5%) | `Total_Facturado` |
+| `paquete_express` | `PAQUETERIA EXPRESS` | **`Rastreo`** (98.7%), NO la `Guía` interna | `Total` |
+
+- **Gotcha Paquete Express:** el `shipment_number` de CH es el **Rastreo**, no la "Guía" (PBC…) que la paquetería usa para facturar. La interna se guarda en `cuenta`.
+- `ch_sync.sync_shipments` trae **todas** las paqueterías de `CARRIER_CH` en una pasada (`carrier_name IN ...`); el cruce en reconcile es por número de guía (riesgo bajo de colisión entre carriers).
+- Para agregar otra: `parsers/<carrier>.py` (mapear por encabezado), registrar en `parsers/__init__.py`, `config.CARRIER_CH`, y `CARRIERS`/`SUPPORTED`/`CARLBL` en la UI.
 
 ## 9. Despliegue (nube)
 
