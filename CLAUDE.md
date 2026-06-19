@@ -35,8 +35,9 @@ ClickHouse fct_shipments + fct_wallet_transactions --sync--> ch_shipments / ch_s
   - **Crédito manual** (métodos `flat` | `margen_global` | `margen_zona` | `margen_kilo`): ingreso = **precio del cliente** calculado por `pricing.precio_sql` (ver abajo); sin `extra` (la tarifa por guía ya cubre re-pesos/retornos).
   - **Prepago**: ingreso = `max(ya_cobrado, piso)`; el **`extra`** es lo único pendiente de cobrar (ya pagó la base con saldo).
 - **Módulo de Costos + precio del cliente (`pricing.py`, jul 2026).** Para los métodos manuales el precio sale de un **rate card de costo** por paquetería, no de una matriz por cliente:
-  - `costos_tarifa` (carrier, zona×kilo → costo, **vigencia global** por versión) · `combustible` (carrier, % por periodo: semanal o mensual) · IVA = `config.IVA_DEFAULT` (16%).
-  - `precio = costo(zona,kilo,vigente) × (1+combustible_del_periodo) × (1+margen) × (1+IVA)`. `flat` ignora costo/fuel: `precio_fijo × (1+IVA)`.
+  - `costos_tarifa` (carrier, **servicio**, zona×kilo → costo; **vigencia global** por versión; servicio vacío = tarifa general/fallback) · `combustible` (carrier, % por periodo: semanal o mensual) · IVA = `config.IVA_DEFAULT` (16%).
+  - El **servicio** de la guía = su `producto` (DHL 'G'/'N', FedEx 'Express Saver', Paquete Express 'Standard'); el costo se busca por servicio (exacto > general).
+  - `precio = costo(servicio,zona,kilo,vigente) × (1+combustible_del_periodo) × (1+margen) × (1+IVA)`. `flat` ignora costo/fuel: `precio_fijo × (1+IVA)`.
   - Margen según método: `margen_global` (config_credito.margen), `margen_zona` (tabla `margen_zona`), `margen_kilo` (tabla `margen_kilo`).
   - **Preview** (`/api/tarifa-preview`): muestra la matriz resultante por cliente para validar antes de cerrar. OJO: el alias externo del preview es `cc` (no `ct`) para no chocar con los alias internos de `pricing.precio_sql`.
   - `'manual'` (config vieja) se normaliza a `'flat'`.
