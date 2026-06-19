@@ -9,7 +9,8 @@ from __future__ import annotations
 from openpyxl import load_workbook
 
 # Columna de la guía por paquetería (misma llave que usa el parser para el cruce).
-_GUIA_COL = {"dhl": "No.De Guia", "fedex": "Guia", "paquete_express": "Rastreo"}
+_GUIA_COL = {"dhl": "No.De Guia", "fedex": "Guia",
+             "paquete_express": "Rastreo", "paquete_express_2": "Rastreo"}
 
 
 def _num(v) -> float:

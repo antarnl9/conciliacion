@@ -651,6 +651,30 @@ def save_margen_kilo(payload: dict):
         con.close()
 
 
+# ---- Paqueterías activas por cliente ----
+@app.get("/api/cliente/carriers")
+def get_cliente_carriers(seller_id: int):
+    con = db.connect()
+    try:
+        return [r[0] for r in con.execute(
+            "SELECT carrier FROM cliente_carrier WHERE seller_id=? ORDER BY carrier", [seller_id]).fetchall()]
+    finally:
+        con.close()
+
+
+@app.post("/api/cliente/carriers")
+def save_cliente_carriers(payload: dict):
+    sid = int(payload["seller_id"]); carriers = payload.get("carriers", [])
+    con = db.connect()
+    try:
+        con.execute("DELETE FROM cliente_carrier WHERE seller_id=?", [sid])
+        for c in carriers:
+            con.execute("INSERT INTO cliente_carrier VALUES (?,?)", [sid, c])
+        return {"ok": True}
+    finally:
+        con.close()
+
+
 # ---- Preview: tarifa resultante del cliente (costo × fuel × margen × IVA) ----
 @app.get("/api/tarifa-preview")
 def tarifa_preview(seller_id: int, carrier: str = "dhl"):

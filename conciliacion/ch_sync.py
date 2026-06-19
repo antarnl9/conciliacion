@@ -13,7 +13,7 @@ def _client():
 def sync_shipments(con, carrier: str | None = None, desde: str = "2025-09-01") -> int:
     """Trae una fila por guía (dedup argMax) de TODAS las paqueterías soportadas a ch_shipments.
     El cruce en reconcile es por número de guía; FedEx usa 'Guia', Paquete Express usa 'Rastreo'."""
-    carriers = list(config.CARRIER_CH.values())  # DHL, FEDEX, PAQUETERIA EXPRESS
+    carriers = sorted(set(config.CARRIER_CH.values()))  # DHL, FEDEX, PAQUETERIA EXPRESS (sin duplicar)
     cli = _client()
     q = f"""
         SELECT shipment_number AS guia,

@@ -98,4 +98,5 @@ CARRIER_CH = {
     "dhl": "DHL",
     "fedex": "FEDEX",
     "paquete_express": "PAQUETERIA EXPRESS",
+    "paquete_express_2": "PAQUETERIA EXPRESS",   # 2ª cuenta: mismo carrier en CH, archivo aparte
 }

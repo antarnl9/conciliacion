@@ -53,7 +53,8 @@ _MAP = {
 }
 
 
-def parse_paquete_express(path: str, sheet: str | None = None) -> Iterator[LineaFactura]:
+def parse_paquete_express(path: str, sheet: str | None = None,
+                          carrier: str = "paquete_express") -> Iterator[LineaFactura]:
     wb = load_workbook(path, read_only=True)
     ws = wb[sheet] if sheet else wb[wb.sheetnames[0]]
     it = ws.iter_rows(values_only=True)
@@ -75,7 +76,7 @@ def parse_paquete_express(path: str, sheet: str | None = None) -> Iterator[Linea
         pza = g(c["pza"])
         recargos = _num(g(c["otros"])) + _num(g(c["rad"]))
         yield LineaFactura(
-            carrier="paquete_express", guia=guia, importe_neto=_num(g(c["net"])), archivo_origen=archivo,
+            carrier=carrier, guia=guia, importe_neto=_num(g(c["net"])), archivo_origen=archivo,
             cuenta=_txt(g(c["cta"])), referencia=_txt(g(c["ref"])), producto=_txt(g(c["prod"])),
             origen=_txt(g(c["org"])), destino=_txt(g(c["des"])),
             piezas=int(pza) if isinstance(pza, (int, float)) else None, kilos=_num(g(c["kg"])),

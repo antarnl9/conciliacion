@@ -136,6 +136,12 @@ CREATE TABLE IF NOT EXISTS factura_recargos (
     monto    DOUBLE
 );
 
+-- Paqueterias activas por cliente (las que usa). Define qué paqueterías se configuran en su tarifario.
+CREATE TABLE IF NOT EXISTS cliente_carrier (
+    seller_id BIGINT,
+    carrier   VARCHAR
+);
+
 -- Cierres de mes (snapshot del periodo).
 CREATE TABLE IF NOT EXISTS periodos (
     mes        VARCHAR,

@@ -264,6 +264,8 @@ const views = {
            <div><span class="lblform">Días de crédito</span>
              <input id="t-dias" type="number" step="1" placeholder="30" style="width:96px" onchange="setDias()"></div>
          </div>
+         <div style="margin-top:16px"><span class="lblform">Paqueterías que usa este cliente</span>
+           <div id="t-carriers" style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px"></div></div>
        </div>
        <div id="tar-body"></div>`;
     onCliente();
@@ -302,18 +304,31 @@ const views = {
 };
 
 // ---- tarifas helpers ----
-const CARRIERS=['dhl','fedex','paquete_express','ups','ampm','t1envios','99min','estafeta','redpack'];
-const CARLBL={dhl:'DHL',fedex:'FedEx',paquete_express:'Paquete Express',ups:'UPS',ampm:'AMPM',t1envios:'T1 Envíos','99min':'99 Minutos',estafeta:'Estafeta',redpack:'Redpack'};
+const CARRIERS=['dhl','fedex','paquete_express','paquete_express_2','ups','ampm','t1envios','99min','estafeta','redpack'];
+const CARLBL={dhl:'DHL',fedex:'FedEx',paquete_express:'Paquete Express N1',paquete_express_2:'Paquete Express N2',ups:'UPS',ampm:'AMPM',t1envios:'T1 Envíos','99min':'99 Minutos',estafeta:'Estafeta',redpack:'Redpack'};
 const carLbl=c=>CARLBL[c]||String(c).toUpperCase();
-window.TAR={seller_id:null,cliente:null,cobro:'automatica',carrier:'dhl'};
+window.TAR={seller_id:null,cliente:null,cobro:'automatica',carrier:'dhl'}; window.TARACTIVE=[];
 function curCli(){const s=$('#t-cliente');if(!s||!s.value)return null;return (window.TARCLI||[]).find(c=>String(c.seller_id)===s.value);}
 function normMetodo(v){ return v==='manual'?'flat':(v||'automatica'); }
-window.onCliente=function(){
+function renderCarrierChecks(){
+  const el=$('#t-carriers'); if(!el)return;
+  el.innerHTML=SUPPORTED.map(c=>`<label style="font-size:13px;color:var(--oxford);display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" class="cm-chk" ${TARACTIVE.includes(c)?'checked':''} onchange="toggleCarrierActivo('${c}')"> ${carLbl(c)}</label>`).join('');
+}
+window.toggleCarrierActivo=async function(c){
+  TARACTIVE=TARACTIVE.includes(c)?TARACTIVE.filter(x=>x!==c):[...TARACTIVE,c];
+  if(!TARACTIVE.includes(TAR.carrier)) TAR.carrier=TARACTIVE[0]||'dhl';
+  renderTarBody();
+  try{ await jpost('/api/cliente/carriers',{seller_id:Number(TAR.seller_id),carriers:TARACTIVE}); }catch(e){}
+};
+window.onCliente=async function(){
   const c=curCli(); if(!c){$('#tar-body').innerHTML='';return;}
   TAR.seller_id=c.seller_id; TAR.cliente=c.cliente; TAR.cobro=normMetodo(c.cobro_tipo);
   const sm=$('#t-metodo'); if(sm)sm.value=TAR.cobro;
   const mg=$('#t-margen'); if(mg)mg.value=(c.margen!=null?Math.round(c.margen*100):'');
   const dc=$('#t-dias'); if(dc)dc.value=(c.dias_credito!=null?c.dias_credito:'');
+  TARACTIVE=await jget('/api/cliente/carriers?seller_id='+TAR.seller_id).catch(()=>[]); if(!Array.isArray(TARACTIVE))TARACTIVE=[];
+  renderCarrierChecks();
+  if(!TARACTIVE.includes(TAR.carrier)) TAR.carrier=TARACTIVE[0]||'';
   renderTarBody();
 };
 window.setCobro=async function(v){
@@ -334,8 +349,12 @@ function renderTarBody(){
     $('#tar-body').innerHTML=`<div class="card"><div class="empty"><h3>Cobro automático</h3><p>Se cobra directo del sistema (precio + sobrepeso). El <b>Margen %</b> de arriba aplica a los <b>extras</b> (re-pesos, retornos, desfases).</p></div></div>`;
     return;
   }
+  if(!TARACTIVE.length){
+    $('#tar-body').innerHTML=`<div class="card"><div class="empty"><h3>Marca las paqueterías</h3><p>Selecciona arriba las paqueterías que usa este cliente para configurar su tarifa por cada una.</p></div></div>`;
+    return;
+  }
   const carSel=`<div class="filters" style="margin-bottom:12px"><span class="muted">Paquetería:</span>
-      <select id="t-carrier" onchange="onCarrier()">${CARRIERS.map(c=>`<option value="${c}" ${c===TAR.carrier?'selected':''}>${carLbl(c)}</option>`).join('')}</select>
+      <select id="t-carrier" onchange="onCarrier()">${TARACTIVE.map(c=>`<option value="${c}" ${c===TAR.carrier?'selected':''}>${carLbl(c)}</option>`).join('')}</select>
       <button class="btn-secondary btn-sm" style="margin-left:auto" onclick="loadPreview()">Ver preview de tarifa</button></div>`;
   let editor='';
   if(m==='margen_global'){
@@ -418,11 +437,13 @@ const SERVICIOS_SUG={
   dhl:[{nombre:'Next Day',codigo:'N'},{nombre:'Ground',codigo:'G'}],
   fedex:[{nombre:'Express Saver',codigo:'Express Saver'},{nombre:'Standard Overnight',codigo:'Standard Overnight'}],
   paquete_express:[{nombre:'Standard',codigo:'Standard'}],
+  paquete_express_2:[{nombre:'Standard',codigo:'Standard'}],
 };
 const RECARGOS_SUG={
   dhl:[{concepto:'Zona extendida',columna:'OO'},{concepto:'Sobredimensión',columna:'YB'},{concepto:'Sobrepeso',columna:'YY'},{concepto:'Multipieza',columna:'YE'}],
   fedex:[{concepto:'Zona extendida',columna:'ODA'},{concepto:'Zona extendida',columna:'OPA'},{concepto:'Sobredimensión',columna:'Oversize_Charge'}],
   paquete_express:[{concepto:'Otros cargos',columna:'Otros'}],
+  paquete_express_2:[{concepto:'Otros cargos',columna:'Otros'}],
 };
 views.costos=async function(){
   const copts=CARRIERS.map(c=>`<option value="${c}" ${c===COSTC?'selected':''}>${carLbl(c)}</option>`).join('');
@@ -611,7 +632,7 @@ window.cerrarMes=async m=>{ if(!confirm('¿Cerrar el mes '+m+'? Guarda el snapsh
 window.repGuias=repGuias;
 
 // ---- modal: cierre de mes ----
-const SUPPORTED=['dhl','fedex','paquete_express'];
+const SUPPORTED=['dhl','fedex','paquete_express','paquete_express_2'];
 window.openCierreModal=async function(mes){
   const meses=await jget('/api/cierre/meses');
   const m=mes||(meses.find(x=>x.estatus!=='cerrado')||meses[0]||{}).mes||'';
