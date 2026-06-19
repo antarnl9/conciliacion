@@ -369,7 +369,7 @@ async function repGuias(offset=0){
       <select id="g-estatus">${opt('g-estatus',['','Cobrado OK','Sobrepeso pendiente','Falta cobrar (credito)','Cobrado bajo costo','Interno (14%)','Sin guia en sistema'],['(estatus)'])}</select>
       <button class="btn-secondary btn-sm" onclick="repGuias(0)">Filtrar</button>
     </div>` +
-    tbl(['Guía','Cliente','Tipo','Estatus','Ret','Costo','Sale','Sobrepeso','Ingreso','Margen','Mes'], d.rows, r=>
+    tbl(['Guía','Cliente','Tipo','Estatus','Ret','Costo','Precio','Sobrepeso','Ingreso','Margen','Mes'], d.rows, r=>
       `<tr><td>${r.guia}</td><td>${r.cliente_real||'—'}</td><td>${r.tipo}</td><td>${badge(r.estatus)}</td>
        <td>${r.es_retorno?'↩︎':''}</td><td>${money(r.costo)}</td><td>${money(r.sale_price)}</td><td>${money(r.sobrepeso)}</td>
        <td>${money(r.ingreso)}</td><td class="${cls(r.margen)}">${money(r.margen)}</td><td>${r.mes_envio||''}</td></tr>`,
