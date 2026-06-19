@@ -5,6 +5,7 @@ Abrir:     http://localhost:8770
 """
 from __future__ import annotations
 
+import datetime as dt
 import shutil
 from pathlib import Path
 
@@ -392,6 +393,7 @@ def tarifas_clientes():
             SELECT r.seller_id, any_value(r.cliente_real) cliente, count(*) guias,
                    round(sum(r.costo),2) costo,
                    coalesce(any_value(cc.metodo),'automatica') cobro_tipo,
+                   any_value(cc.margen) margen, any_value(cc.dias_credito) dias_credito,
                    (SELECT count(*) FROM tarifas t WHERE t.seller_id = r.seller_id) filas_tarifa
             FROM reconciliacion r
             LEFT JOIN config_credito cc ON cc.seller_id = r.seller_id
@@ -403,13 +405,21 @@ def tarifas_clientes():
 
 @app.post("/api/cliente/cobro")
 def set_cobro(payload: dict):
-    """Define cobro automatico (ClickHouse) o manual (tarifa) para un cliente."""
+    """Configura el cobro de un cliente de crédito: método, margen y días de crédito.
+    Hace merge: solo cambia los campos enviados, conserva los demás."""
     con = db.connect()
     try:
         sid = int(payload["seller_id"])
+        cur = con.execute("SELECT metodo, margen, dias_credito, cliente FROM config_credito WHERE seller_id = ?",
+                          [sid]).fetchone()
+        metodo = payload.get("cobro_tipo") or (cur[0] if cur else "automatica")
+        margen = _f(payload["margen"]) if "margen" in payload else (cur[1] if cur else None)
+        dias = _i(payload["dias_credito"]) if "dias_credito" in payload else (cur[2] if cur else None)
+        cliente = payload.get("cliente") or (cur[3] if cur else None)
         con.execute("DELETE FROM config_credito WHERE seller_id = ?", [sid])
-        con.execute("INSERT INTO config_credito VALUES (?,?,?,?,?)",
-                    [sid, payload.get("cliente"), payload.get("cobro_tipo", "automatica"), None, None])
+        con.execute("""INSERT INTO config_credito
+            (seller_id, cliente, metodo, valor, nota, margen, dias_credito) VALUES (?,?,?,?,?,?,?)""",
+            [sid, cliente, metodo, None, None, margen, dias])
         return {"ok": True}
     finally:
         con.close()
@@ -474,34 +484,119 @@ def _f(v):
         return None
 
 
+def _i(v):
+    try:
+        return int(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 @app.post("/api/cobro/generar")
 def generar_cobro(mes: str = Query(...)):
-    """Genera el cobro por cliente para un mes (desde la conciliación)."""
+    """Genera el cobro por cliente del mes:
+       - crédito  -> factura completa (Σ ingreso: tarifa si es manual, sistema+extra si automático)
+       - prepago  -> solo extras (Σ extra), aparece únicamente si hay extras
+       Upsert: conserva el ciclo (enviada/pagos) de cobros ya existentes."""
     con = db.connect()
     try:
         rows = _rows(con, """
-            SELECT seller_id, any_value(cliente_real) cliente, count(*) guias,
-                   round(sum(coalesce(ingreso,0)),2) monto
+            SELECT seller_id, any_value(cliente_real) cliente, 'credito' tipo, 'factura' concepto,
+                   count(*) guias, round(sum(ingreso),2) monto
             FROM reconciliacion
-            WHERE mes_envio = ? AND seller_id IS NOT NULL AND tipo = 'credito'
-            GROUP BY seller_id HAVING monto > 0 ORDER BY monto DESC""", [mes])
-        con.execute("DELETE FROM cobros WHERE mes = ?", [mes])
+            WHERE mes_envio = ? AND seller_id IS NOT NULL AND tipo='credito' AND ingreso IS NOT NULL
+            GROUP BY seller_id HAVING sum(ingreso) > 0
+            UNION ALL
+            SELECT seller_id, any_value(cliente_real), 'prepago', 'extra',
+                   count(*) FILTER (WHERE extra > 0.5), round(sum(extra),2)
+            FROM reconciliacion
+            WHERE mes_envio = ? AND seller_id IS NOT NULL AND tipo='prepago'
+            GROUP BY seller_id HAVING sum(extra) > 0.5
+            ORDER BY monto DESC""", [mes, mes])
+        keep = []
         for r in rows:
-            con.execute("INSERT INTO cobros VALUES (?,?,?,?,?,?, now(), NULL)",
-                        [r["seller_id"], r["cliente"], mes, r["guias"], r["monto"], "generado"])
-        return {"mes": mes, "sellers": len(rows), "monto_total": round(sum(r["monto"] for r in rows), 2)}
+            keep.append(r["seller_id"])
+            exists = con.execute("SELECT 1 FROM cobros WHERE seller_id=? AND mes=?",
+                                 [r["seller_id"], mes]).fetchone()
+            if exists:
+                con.execute("""UPDATE cobros SET cliente=?, guias=?, monto=?, tipo=?, concepto=?
+                               WHERE seller_id=? AND mes=?""",
+                            [r["cliente"], r["guias"], r["monto"], r["tipo"], r["concepto"], r["seller_id"], mes])
+            else:
+                con.execute("""INSERT INTO cobros
+                    (seller_id,cliente,mes,guias,monto,estatus,generado_en,nota,tipo,concepto,monto_pagado,fecha_enviada,fecha_vencimiento)
+                    VALUES (?,?,?,?,?,'generado', now(), NULL, ?,?, 0, NULL, NULL)""",
+                    [r["seller_id"], r["cliente"], mes, r["guias"], r["monto"], r["tipo"], r["concepto"]])
+        # quita cobros obsoletos del mes (clientes que ya no aplican) que sigan sin tocar
+        if keep:
+            ph = ",".join("?" * len(keep))
+            con.execute(f"DELETE FROM cobros WHERE mes=? AND estatus='generado' AND seller_id NOT IN ({ph})",
+                        [mes, *keep])
+        else:
+            con.execute("DELETE FROM cobros WHERE mes=? AND estatus='generado'", [mes])
+        tot = con.execute("SELECT count(*), round(sum(monto),2) FROM cobros WHERE mes=?", [mes]).fetchone()
+        return {"mes": mes, "sellers": tot[0], "monto_total": tot[1] or 0}
     finally:
         con.close()
 
 
 @app.get("/api/cobros")
 def list_cobros(mes: str):
+    """Libro de cuentas por cobrar del mes: monto, pagado, saldo, vencimiento y atraso."""
     con = db.connect()
     try:
         return _rows(con, """
-            SELECT c.seller_id, c.cliente, c.guias, c.monto, c.estatus,
+            WITH pg AS (SELECT seller_id, round(sum(monto),2) pagado FROM pagos WHERE mes=? GROUP BY seller_id)
+            SELECT c.seller_id, c.cliente, c.tipo, c.concepto, c.guias, c.monto,
+                   COALESCE(pg.pagado, 0) AS pagado,
+                   round(c.monto - COALESCE(pg.pagado, 0), 2) AS saldo,
+                   c.estatus, c.fecha_enviada, c.fecha_vencimiento,
+                   CASE WHEN c.fecha_vencimiento IS NOT NULL AND c.estatus <> 'pagado'
+                             AND current_date > c.fecha_vencimiento
+                        THEN date_diff('day', c.fecha_vencimiento, current_date) ELSE 0 END AS dias_atraso,
                    (SELECT count(*) FROM cobro_adjuntos a WHERE a.seller_id=c.seller_id AND a.mes=c.mes) > 0 AS tiene_pdf
-            FROM cobros c WHERE c.mes = ? ORDER BY c.monto DESC""", [mes])
+            FROM cobros c LEFT JOIN pg ON pg.seller_id = c.seller_id
+            WHERE c.mes = ? ORDER BY saldo DESC, c.monto DESC""", [mes, mes])
+    finally:
+        con.close()
+
+
+@app.post("/api/cobro/enviar")
+def cobro_enviar(payload: dict):
+    """Marca la factura como enviada y calcula vencimiento = fecha + días de crédito del cliente."""
+    sid = int(payload["seller_id"]); mes = payload["mes"]
+    con = db.connect()
+    try:
+        row = con.execute("SELECT dias_credito FROM config_credito WHERE seller_id=?", [sid]).fetchone()
+        dias = (row[0] if row and row[0] else config.DIAS_CREDITO_DEFAULT)
+        fenv = dt.date.fromisoformat(payload["fecha"]) if payload.get("fecha") else dt.date.today()
+        fvenc = fenv + dt.timedelta(days=int(dias))
+        con.execute("""UPDATE cobros SET fecha_enviada=?, fecha_vencimiento=?,
+                       estatus = CASE WHEN estatus='pagado' THEN 'pagado'
+                                      WHEN COALESCE(monto_pagado,0) > 0 THEN 'parcial' ELSE 'enviado' END
+                       WHERE seller_id=? AND mes=?""", [fenv, fvenc, sid, mes])
+        return {"ok": True, "dias_credito": int(dias), "vencimiento": str(fvenc)}
+    finally:
+        con.close()
+
+
+@app.post("/api/cobro/pago")
+def cobro_pago(payload: dict):
+    """Registra un abono (pago parcial o total). Recalcula saldo y estatus."""
+    sid = int(payload["seller_id"]); mes = payload["mes"]
+    monto = float(payload["monto"])
+    fecha = dt.date.fromisoformat(payload["fecha"]) if payload.get("fecha") else dt.date.today()
+    con = db.connect()
+    try:
+        con.execute("INSERT INTO pagos VALUES (?,?,?,?,?, now())",
+                    [sid, mes, fecha, monto, payload.get("nota")])
+        pagado = con.execute("SELECT round(sum(monto),2) FROM pagos WHERE seller_id=? AND mes=?",
+                             [sid, mes]).fetchone()[0] or 0
+        trow = con.execute("SELECT monto FROM cobros WHERE seller_id=? AND mes=?", [sid, mes]).fetchone()
+        total = (trow[0] if trow else 0) or 0
+        est = "pagado" if pagado >= total - 0.5 else ("parcial" if pagado > 0 else "enviado")
+        con.execute("UPDATE cobros SET monto_pagado=?, estatus=? WHERE seller_id=? AND mes=?",
+                    [pagado, est, sid, mes])
+        return {"ok": True, "pagado": pagado, "saldo": round(total - pagado, 2), "estatus": est}
     finally:
         con.close()
 
@@ -526,15 +621,20 @@ def cobro_seller(seller_id: int, mes: str):
     try:
         cliente = con.execute("SELECT any_value(cliente_real) FROM reconciliacion WHERE seller_id = ?",
                               [seller_id]).fetchone()[0] or str(seller_id)
+        # concepto del cobro: 'extra' (prepago: solo guías con extra) o 'factura' (crédito: todas).
+        crow = con.execute("SELECT concepto FROM cobros WHERE seller_id=? AND mes=?", [seller_id, mes]).fetchone()
+        es_extra = bool(crow and crow[0] == "extra")
         # Excel PARA EL CLIENTE: detalle del servicio + importe a cobrar (sin costo ni margen).
-        rows = con.execute("""
+        imp = "r.extra" if es_extra else "r.ingreso"
+        filtro = "AND r.extra > 0.5" if es_extra else ""
+        rows = con.execute(f"""
             WITH carrier AS (
                 SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY guia ORDER BY fecha_factura NULLS LAST) rn
                                FROM facturas_carrier) WHERE rn = 1)
             SELECT fc.guia, fc.fecha_envio, fc.fecha_factura, fc.producto, fc.origen, fc.destino,
-                   fc.piezas, fc.kilos, fc.zona, round(r.ingreso,2) AS importe
+                   fc.piezas, fc.kilos, fc.zona, round({imp},2) AS importe
             FROM reconciliacion r JOIN carrier fc ON fc.guia = r.guia
-            WHERE r.seller_id = ? AND r.mes_envio = ? ORDER BY fc.guia""",
+            WHERE r.seller_id = ? AND r.mes_envio = ? {filtro} ORDER BY fc.guia""",
             [seller_id, mes]).fetchall()
         headers = ["Guía", "Fecha Envío", "Fecha Factura", "Producto", "Origen", "Destino",
                    "Piezas", "Kilos", "Zona", "Importe"]

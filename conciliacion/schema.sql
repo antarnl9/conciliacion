@@ -61,11 +61,13 @@ CREATE TABLE IF NOT EXISTS ch_recargas (
 
 -- Configuración de cobro por cliente de crédito (cada cliente tiene su regla).
 CREATE TABLE IF NOT EXISTS config_credito (
-    seller_id BIGINT,
-    cliente   VARCHAR,
-    metodo    VARCHAR,   -- 'margen_pct' | 'precio_fijo' | 'tarifa_zona'
-    valor     DOUBLE,    -- % (0.14) o precio fijo por guia
-    nota      VARCHAR
+    seller_id    BIGINT,
+    cliente      VARCHAR,
+    metodo       VARCHAR,   -- 'automatica' (precio sistema + extra) | 'manual' (tarifa zona/kilo)
+    valor        DOUBLE,    -- (legado) % o precio fijo por guia
+    nota         VARCHAR,
+    margen       DOUBLE,    -- margen para el extra (ej. 0.14); piso de cobro = costo*(1+margen)
+    dias_credito INTEGER    -- plazo de pago en días (default 30) para vencimiento/atraso
 );
 
 -- Tarifas por cliente: matriz (zona x rango de kilo) -> precio, con vigencia.
@@ -108,6 +110,7 @@ CREATE TABLE IF NOT EXISTS reconciliacion (
     sale_price        DOUBLE,
     sobrepeso_cobrado DOUBLE,
     tarifa_precio     DOUBLE,
+    extra             DOUBLE,
     ingreso           DOUBLE,
     margen            DOUBLE,
     estatus           VARCHAR,
@@ -115,16 +118,31 @@ CREATE TABLE IF NOT EXISTS reconciliacion (
     mes_factura       VARCHAR
 );
 
--- Cobro generado por cliente/mes (para descargar y monitorear su estatus).
+-- Cobro generado por cliente/mes — libro de cuentas por cobrar.
 CREATE TABLE IF NOT EXISTS cobros (
-    seller_id   BIGINT,
-    cliente     VARCHAR,
-    mes         VARCHAR,
-    guias       BIGINT,
-    monto       DOUBLE,
-    estatus     VARCHAR,   -- 'generado' | 'enviado' | 'pagado'
-    generado_en TIMESTAMP,
-    nota        VARCHAR
+    seller_id        BIGINT,
+    cliente          VARCHAR,
+    mes              VARCHAR,
+    guias            BIGINT,
+    monto            DOUBLE,     -- total a cobrar al cliente en el mes
+    estatus          VARCHAR,    -- 'generado' | 'enviado' | 'parcial' | 'pagado'
+    generado_en      TIMESTAMP,
+    nota             VARCHAR,
+    tipo             VARCHAR,    -- 'credito' | 'prepago'
+    concepto         VARCHAR,    -- 'factura' (cobro completo) | 'extra' (solo sobrepeso/retornos/desfase)
+    monto_pagado     DOUBLE,     -- suma de abonos (pagos parciales)
+    fecha_enviada    DATE,       -- cuándo se envió la factura al cliente
+    fecha_vencimiento DATE       -- fecha_enviada + dias_credito
+);
+
+-- Abonos / pagos parciales por cobro (cliente+mes). saldo = monto - sum(pagos).
+CREATE TABLE IF NOT EXISTS pagos (
+    seller_id     BIGINT,
+    mes           VARCHAR,
+    fecha         DATE,
+    monto         DOUBLE,
+    nota          VARCHAR,
+    registrado_en TIMESTAMP
 );
 
 -- PDF de factura adjunto por cliente/mes (para tener todo junto).

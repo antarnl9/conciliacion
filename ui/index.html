@@ -176,7 +176,7 @@ const money=n=>n==null?'—':'$'+fmt(n);
 const cls=n=>(n||0)<0?'neg':'pos';
 const jget=u=>fetch(u).then(r=>r.json());
 const jpost=(u,b)=>fetch(u,{method:'POST',headers:b?{'Content-Type':'application/json'}:{},body:b?JSON.stringify(b):undefined}).then(r=>r.json());
-const BADGE={'Cobrado OK':'b-green','Sobrepeso pendiente':'b-orange','Falta cobrar (credito)':'b-yellow','Cobrado, costo pendiente':'b-blue','Cobrado bajo costo':'b-red','Interno (14%)':'b-blue','Sin guia en sistema':'b-gray'};
+const BADGE={'Cobrado OK':'b-green','Extra por cobrar':'b-orange','Sobrepeso pendiente':'b-orange','Falta cobrar (credito)':'b-yellow','Cobrado, costo pendiente':'b-blue','Cobrado bajo costo':'b-red','Interno (14%)':'b-blue','Sin guia en sistema':'b-gray'};
 const badge=s=>`<span class="badge ${BADGE[s]||'b-gray'}">${s}</span>`;
 let VIEW='cierre';
 
@@ -227,30 +227,44 @@ const views = {
          <span class="muted" style="margin-left:16px">Cobro:</span>
          <label style="font-size:13px;color:var(--oxford)"><input type="radio" name="cobro" value="automatica" onchange="setCobro('automatica')"> Automático (del sistema)</label>
          <label style="font-size:13px;color:var(--oxford);margin-left:6px"><input type="radio" name="cobro" value="manual" onchange="setCobro('manual')"> Manual (tarifa)</label>
+         <span class="muted" style="margin-left:16px" title="Margen para extras (sobrepeso/retornos/desfase): piso = costo×(1+margen)">Margen %:</span>
+         <input id="t-margen" type="number" step="1" placeholder="14" style="width:64px" onchange="setMargen()">
+         <span class="muted" style="margin-left:10px" title="Plazo de pago para vencimiento y días de atraso">Días crédito:</span>
+         <input id="t-dias" type="number" step="1" placeholder="30" style="width:64px" onchange="setDias()">
        </div>
        <div id="tar-body"></div>`;
     onCliente();
   },
-  // ---------- COBRANZA (generar + monitorear cobro por cliente) ----------
+  // ---------- COBRANZA (libro de cuentas por cobrar) ----------
   async cobranza(){
     const meses = await jget('/api/cierre/meses');
     if(!window.COBMES) window.COBMES=(meses.find(m=>m.estatus!=='cerrado')||meses[0]||{}).mes||'';
     const opts = meses.map(m=>`<option value="${m.mes}" ${m.mes===COBMES?'selected':''}>${m.mes}</option>`).join('');
     const rows = await jget('/api/cobros?mes='+COBMES);
     const tot = rows.reduce((a,r)=>a+(r.monto||0),0);
-    const pag = rows.filter(r=>r.estatus==='pagado').reduce((a,r)=>a+(r.monto||0),0);
-    $('#view').innerHTML = toolbar('Cobranza · crédito', `Cobro a clientes de crédito · ${COBMES} · total $${fmt(tot)} · cobrado $${fmt(pag)} · (prepago ya pagó por saldo)`,
+    const pagado = rows.reduce((a,r)=>a+(r.pagado||0),0);
+    const venc = rows.filter(r=>r.dias_atraso>0).length;
+    const ESTB={generado:'b-gray',enviado:'b-blue',parcial:'b-yellow',pagado:'b-green'};
+    $('#view').innerHTML = toolbar('Cobranza',
+        `${COBMES} · por cobrar $${fmt(tot)} · pagado $${fmt(pagado)} · saldo $${fmt(tot-pagado)} · ${venc} vencidos`,
         `<button class="btn-primary" onclick="generarCobro()">Generar cobro del mes</button>`) +
       `<div class="filters"><span class="muted">Mes:</span><select id="cob-mes" onchange="cobMes()">${opts}</select></div>` +
-      (rows.length ? tbl(['Cliente','Guías','Monto a cobrar','Estatus','Cobro (detalle)','Factura PDF'], rows, r=>
-        `<tr><td><b>${r.cliente||'—'}</b></td><td>${fmt(r.guias)}</td><td><b>${money(r.monto)}</b></td>
-         <td><select class="cob-est" onchange="setCobEst(${r.seller_id},this.value)">
-            ${['generado','enviado','pagado'].map(e=>`<option value="${e}" ${e===r.estatus?'selected':''}>${e}</option>`).join('')}
-         </select> <span class="badge ${r.estatus==='pagado'?'b-green':r.estatus==='enviado'?'b-blue':'b-gray'}">${r.estatus}</span></td>
-         <td><a class="btn-secondary btn-sm" style="text-decoration:none" href="${dl(`/api/cobro/seller?seller_id=${r.seller_id}&mes=${COBMES}`)}">Descargar Excel</a></td>
-         <td>${r.tiene_pdf
-            ? `<a class="btn-secondary btn-sm" style="text-decoration:none;color:var(--green-700)" href="${dl(`/api/cobro/pdf?seller_id=${r.seller_id}&mes=${COBMES}`)}" target="_blank">Ver factura ✓</a>`
-            : `<label class="file"><span class="btn-secondary btn-sm">Adjuntar PDF</span><input type="file" accept=".pdf" onchange="subirPdf(${r.seller_id},this)"></label>`}</td></tr>`)
+      (rows.length ? tbl(['Cliente','Tipo','Guías','Monto','Pagado','Saldo','Vence','Estatus','Acciones'], rows, r=>{
+        const vence=r.fecha_vencimiento ? `${r.fecha_vencimiento}${r.dias_atraso>0?` <span style="color:var(--red-700);font-weight:600">+${r.dias_atraso}d</span>`:''}` : '—';
+        const acc=[];
+        if(r.estatus==='generado') acc.push(`<button class="btn-secondary btn-sm" onclick="enviarFactura(${r.seller_id})">Enviar</button>`);
+        if(r.estatus!=='pagado') acc.push(`<button class="btn-secondary btn-sm" onclick="registrarPago(${r.seller_id},${r.saldo})">Pago</button>`);
+        acc.push(`<a class="btn-secondary btn-sm" style="text-decoration:none" href="${dl(`/api/cobro/seller?seller_id=${r.seller_id}&mes=${COBMES}`)}">Excel</a>`);
+        acc.push(r.tiene_pdf
+          ? `<a class="btn-secondary btn-sm" style="text-decoration:none;color:var(--green-700)" href="${dl(`/api/cobro/pdf?seller_id=${r.seller_id}&mes=${COBMES}`)}" target="_blank">PDF ✓</a>`
+          : `<label class="file"><span class="btn-secondary btn-sm">PDF</span><input type="file" accept=".pdf" onchange="subirPdf(${r.seller_id},this)"></label>`);
+        return `<tr><td><b>${r.cliente||'—'}</b></td>
+          <td><span class="badge ${r.tipo==='credito'?'b-blue':'b-gray'}">${r.tipo}${r.concepto==='extra'?' · extra':''}</span></td>
+          <td>${fmt(r.guias)}</td><td><b>${money(r.monto)}</b></td><td>${money(r.pagado)}</td>
+          <td class="${r.saldo>0.5?'neg':'pos'}"><b>${money(r.saldo)}</b></td>
+          <td style="font-size:12px;white-space:nowrap">${vence}</td>
+          <td><span class="badge ${ESTB[r.estatus]||'b-gray'}">${r.estatus}</span></td>
+          <td><div style="display:flex;gap:4px;flex-wrap:wrap">${acc.join('')}</div></td></tr>`;})
       : `<div class="card"><div class="empty"><h3>Sin cobro generado para ${COBMES}</h3><p>Da clic en "Generar cobro del mes" para crear el cobro por cliente desde la conciliación.</p></div></div>`);
   },
   rep_prepago: null, // placeholders set below
@@ -264,12 +278,22 @@ window.onCliente=function(){
   const c=curCli(); if(!c){$('#tar-body').innerHTML='';return;}
   TAR.seller_id=c.seller_id; TAR.cliente=c.cliente; TAR.cobro=c.cobro_tipo||'automatica';
   document.querySelectorAll('input[name=cobro]').forEach(r=>r.checked=(r.value===TAR.cobro));
+  const mg=$('#t-margen'); if(mg)mg.value=(c.margen!=null?Math.round(c.margen*100):'');
+  const dc=$('#t-dias'); if(dc)dc.value=(c.dias_credito!=null?c.dias_credito:'');
   renderTarBody();
 };
 window.setCobro=async function(v){
   TAR.cobro=v;
   await jpost('/api/cliente/cobro',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,cobro_tipo:v});
   renderTarBody();
+};
+window.setMargen=async function(){
+  const v=$('#t-margen').value;
+  await jpost('/api/cliente/cobro',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,margen:v===''?null:Number(v)/100});
+};
+window.setDias=async function(){
+  const v=$('#t-dias').value;
+  await jpost('/api/cliente/cobro',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,dias_credito:v===''?null:Number(v)});
 };
 function renderTarBody(){
   if(TAR.cobro!=='manual'){
@@ -416,6 +440,22 @@ window.generarCobro=async function(){
   alert(`Cobro generado para ${COBMES}: ${r.sellers} clientes · $${fmt(r.monto_total)}`); views.cobranza();
 };
 window.setCobEst=async function(sid,est){ await jpost('/api/cobro/estatus',{seller_id:sid,mes:COBMES,estatus:est}); views.cobranza(); };
+window.enviarFactura=async function(sid){
+  if(!confirm('¿Marcar la factura como enviada hoy? El vencimiento se calcula con los días de crédito del cliente.'))return;
+  const r=await jpost('/api/cobro/enviar',{seller_id:sid,mes:COBMES});
+  if(r.vencimiento)$('#job').innerHTML=`<span class="dot ok"></span>enviada · vence ${r.vencimiento}`;
+  views.cobranza();
+};
+window.registrarPago=async function(sid,saldo){
+  const m=prompt('Monto del pago (saldo $'+fmt(saldo)+'):', Math.round(saldo*100)/100);
+  if(m===null||m==='')return;
+  const monto=Number(m); if(!(monto>0)){alert('Monto inválido');return;}
+  const f=prompt('Fecha del pago (YYYY-MM-DD):', new Date().toISOString().slice(0,10));
+  if(f===null)return;
+  const r=await jpost('/api/cobro/pago',{seller_id:sid,mes:COBMES,monto,fecha:f||undefined});
+  $('#job').innerHTML=`<span class="dot ok"></span>pago $${fmt(r.pagado)} · saldo $${fmt(r.saldo)}`;
+  views.cobranza();
+};
 window.subirPdf=async function(sid,input){
   const f=input.files[0]; if(!f)return;
   const fd=new FormData(); fd.append('file',f);

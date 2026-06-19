@@ -37,8 +37,18 @@ def connect() -> duckdb.DuckDBPyConnection:
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(config.DUCKDB_PATH))
     con.execute(SCHEMA_SQL.read_text())
-    # migración: zona en facturas_carrier (para cruce de tarifa por zona/kilo)
-    con.execute("ALTER TABLE facturas_carrier ADD COLUMN IF NOT EXISTS zona VARCHAR")
+    # migraciones idempotentes sobre BDs ya existentes (el volumen)
+    for ddl in (
+        "ALTER TABLE facturas_carrier ADD COLUMN IF NOT EXISTS zona VARCHAR",
+        "ALTER TABLE config_credito ADD COLUMN IF NOT EXISTS margen DOUBLE",
+        "ALTER TABLE config_credito ADD COLUMN IF NOT EXISTS dias_credito INTEGER",
+        "ALTER TABLE cobros ADD COLUMN IF NOT EXISTS tipo VARCHAR",
+        "ALTER TABLE cobros ADD COLUMN IF NOT EXISTS concepto VARCHAR",
+        "ALTER TABLE cobros ADD COLUMN IF NOT EXISTS monto_pagado DOUBLE",
+        "ALTER TABLE cobros ADD COLUMN IF NOT EXISTS fecha_enviada DATE",
+        "ALTER TABLE cobros ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE",
+    ):
+        con.execute(ddl)
     return con
 
 

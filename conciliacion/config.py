@@ -80,6 +80,12 @@ INTERNAS_SUBSTRING_MARGEN = {
     "INBURSA": 0.14,
 }
 
+# Extras (sobrepeso/retornos/desfase) en prepago y crédito automático: se cobran a
+# costo*(1+margen). Si el cliente no tiene margen configurado, se usa este default.
+MARGEN_EXTRA_DEFAULT = 0.14
+# Plazo de crédito por defecto (días) para vencimiento y días de atraso.
+DIAS_CREDITO_DEFAULT = 30
+
 # Modelos de pago en ClickHouse (seller_configuration_name)
 CONFIG_PREPAGO = "Prepago"               # cobra al día con saldo; ingreso = sale_price + sobrepeso
 CONFIG_CREDITO = "Prepago sin saldo"     # cobra por Acre con rezago; ingreso = factura real subida
