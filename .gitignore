@@ -1,0 +1,10 @@
+.venv/
+.env.local
+.env.*.local
+data/*.duckdb
+data/uploads/
+exports/*.xlsx
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/

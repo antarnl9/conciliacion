@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Conciliación · T1 Finanzas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --white:#fff; --oxford:#4C4C4C;
+    --red-50:#FEF4F4; --red-100:#F9D2D2; --red-500:#DB3B2B; --red-600:#DB362B; --red-700:#CC0000;
+    --gray-50:#F8F8F8; --gray-100:#F3F3F3; --gray-200:#E7E7E7; --gray-300:#DBDBDB; --gray-400:#CFCFCF;
+    --gray-600:#9CA3AF; --gray-700:#6B7280; --gray-800:#4B5563; --gray-900:#1F2937;
+    --green-100:#F0FDF4; --green-700:#16A34A;
+    --orange-100:#FFF0E5; --orange-700:#CC5200;
+    --yellow-100:#FFF4BF; --yellow-700:#A96A00;
+    --blue-100:#F0F8FF; --blue-500:#2180FF;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--white);color:var(--oxford);font-family:Manrope,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.366;display:flex;min-height:100vh;font-size:14px}
+  /* ---------- sidebar ---------- */
+  aside{width:240px;flex:0 0 240px;background:var(--white);border-right:1px solid var(--gray-200);display:flex;flex-direction:column;padding:18px 12px;position:sticky;top:0;height:100vh}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:17px;color:var(--gray-900);padding:4px 10px 18px}
+  .brand .mark{width:26px;height:26px;border-radius:7px;background:var(--red-500);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700}
+  nav{display:flex;flex-direction:column;gap:2px}
+  .grouplbl{font-size:11px;font-weight:600;color:var(--gray-600);text-transform:uppercase;letter-spacing:.05em;padding:14px 10px 6px}
+  nav a{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;color:var(--gray-700);text-decoration:none;cursor:pointer;font-weight:500;font-size:13.5px}
+  nav a:hover{background:var(--gray-50);color:var(--oxford)}
+  nav a.active{background:var(--red-50);color:var(--red-500);font-weight:600}
+  nav a.sub{padding-left:30px;font-size:13px}
+  .spacer{flex:1}
+  .footer{border-top:1px solid var(--gray-200);padding-top:12px;display:flex;flex-direction:column;gap:7px}
+  .job{font-size:11.5px;color:var(--gray-600);min-height:15px;padding:2px 4px}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+  .dot.run{background:#EDBD55;animation:pulse 1s infinite}.dot.ok{background:var(--green-700)}.dot.err{background:var(--red-700)}
+  @keyframes pulse{50%{opacity:.35}}
+  /* ---------- main ---------- */
+  main{flex:1;padding:24px 28px;overflow:auto;background:var(--white)}
+  .toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:12px;flex-wrap:wrap}
+  h1.title{font-size:24px;font-weight:700;color:var(--oxford);margin:0}
+  .sub{color:var(--gray-700);font-size:13px;margin-top:3px}
+  /* botones */
+  button,.btn{font-family:inherit;border:0;border-radius:10px;height:36px;padding:0 15px;font-weight:600;font-size:13.5px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;justify-content:center}
+  .btn-primary{background:var(--red-500);color:#fff}.btn-primary:hover{background:var(--red-600)}
+  .btn-secondary{background:#fff;border:1px solid var(--gray-200);color:var(--oxford)}.btn-secondary:hover{background:var(--gray-50)}
+  .btn-sm{height:30px;font-size:12.5px;padding:0 11px}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  label.file{display:inline-block}label.file input{display:none}
+  /* kpis */
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+  .kpi{border:1px solid var(--gray-200);border-radius:12px;padding:14px 16px;background:#fff}
+  .kpi .lbl{color:var(--gray-600);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .kpi .val{font-size:23px;font-weight:700;color:var(--gray-900);margin-top:6px}
+  .kpi.green .val{color:var(--green-700)}.kpi.red .val{color:var(--red-700)}.kpi.orange .val{color:var(--orange-700)}
+  /* tabla Nexus */
+  .card{border:1px solid var(--gray-200);border-radius:12px;overflow:hidden;background:#fff}
+  .tblwrap{overflow:auto;max-height:68vh}
+  table{width:100%;border-collapse:collapse}
+  thead th{position:sticky;top:0;z-index:2;background:var(--blue-100);color:var(--gray-600);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;text-align:right;padding:11px 12px;border-bottom:1px solid var(--gray-200);white-space:nowrap}
+  thead th:first-child{text-align:left}
+  tbody td{font-size:12px;font-weight:500;color:var(--oxford);text-align:right;padding:10px 12px;border-bottom:1px solid var(--gray-200);white-space:nowrap}
+  tbody td:first-child{text-align:left}
+  tbody tr:hover{background:var(--gray-50)}
+  .neg{color:var(--red-700)}.pos{color:var(--green-700)}
+  .badge{display:inline-flex;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600}
+  .b-green{background:var(--green-100);color:var(--green-700)}.b-orange{background:var(--orange-100);color:var(--orange-700)}
+  .b-yellow{background:var(--yellow-100);color:var(--yellow-700)}.b-red{background:var(--red-50);color:var(--red-700)}
+  .b-blue{background:var(--blue-100);color:var(--blue-500)}.b-gray{background:var(--gray-100);color:var(--gray-700)}
+  /* filtros / inputs */
+  .filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+  input,select{font-family:inherit;background:#fff;border:1px solid var(--gray-200);color:var(--oxford);border-radius:10px;height:34px;padding:0 10px;font-size:13px}
+  input:focus,select:focus{outline:none;border-color:var(--gray-400)}
+  input[type=date]{height:34px}
+  .pager{display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--gray-200);padding:11px 14px;font-size:12px;color:var(--oxford)}
+  .pgbtn{height:26px;min-width:26px;border-radius:6px;border:1px solid var(--gray-200);background:#fff;font-size:12px}
+  .muted{color:var(--gray-600)}
+  .empty{padding:60px 20px;text-align:center;color:var(--gray-600)}
+  .empty h3{color:var(--oxford);font-size:16px;font-weight:600;margin:0 0 6px}
+  /* modal */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:100}
+  .modal-overlay.show{display:flex}
+  .modal{background:#fff;border-radius:14px;width:540px;max-width:92vw;max-height:88vh;overflow:auto;box-shadow:0 12px 44px rgba(0,0,0,.25)}
+  .modal-head{display:flex;align-items:center;gap:10px;padding:18px 22px;border-bottom:1px solid var(--gray-200)}
+  .modal-head h3{margin:0;font-size:18px;font-weight:700;color:var(--gray-900);flex:1}
+  .modal-head .x{background:none;color:var(--gray-600);width:30px;height:30px;padding:0;font-size:16px}
+  .modal-body{padding:18px 22px}
+  .modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:16px 22px;border-top:1px solid var(--gray-200)}
+  .lblform{font-size:12px;font-weight:600;color:var(--gray-700);text-transform:uppercase;letter-spacing:.04em;display:block;margin:0 0 7px}
+  .crow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100)}
+  .crow .nm{flex:1;display:flex;align-items:center;gap:9px;font-weight:600;color:var(--oxford)}
+  .crow.off{opacity:.4}
+  .crow .fname{font-size:11.5px;color:var(--green-700);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand"><span class="mark">T1</span> Conciliación</div>
+  <nav id="nav">
+    <a data-v="cierre" class="active">Cierre de mes</a>
+    <a data-v="cobranza">Cobranza</a>
+    <a data-v="tarifas">Configuración de tarifas</a>
+    <div class="grouplbl">Reportes</div>
+    <a data-v="rep-prepago" class="sub">Prepago</a>
+    <a data-v="rep-credito" class="sub">Crédito</a>
+    <a data-v="rep-cobrar" class="sub">Por cobrar</a>
+    <a data-v="rep-guias" class="sub">Detalle por guía</a>
+  </nav>
+  <div class="spacer"></div>
+  <div class="footer">
+    <div class="t" style="font-size:11px;color:var(--gray-600)">Datos</div>
+    <div style="display:flex;gap:6px;align-items:center"><span class="muted" style="font-size:11px">Desde</span><input type="date" id="desde" value="2025-09-01" style="flex:1;min-width:0"><button class="btn-secondary btn-sm" id="b-sync" title="Sincronizar ClickHouse">Sincronizar</button></div>
+    <div class="job" id="job"></div>
+  </div>
+</aside>
+
+<main><div id="view"></div></main>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-head"><h3 id="cm-title">Cierre de mes</h3><button class="x" onclick="closeModal()">✕</button></div>
+    <div class="modal-body">
+      <label class="lblform">Mes a cerrar</label>
+      <input type="month" id="cm-mes" style="width:100%;margin-bottom:18px">
+      <label class="lblform">Archivos de paqueterías</label>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Deselecciona las paqueterías que no apliquen para este cierre. Sube el Excel de cada una.</div>
+      <div id="cm-carriers"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn-primary" id="cm-proc" onclick="procesarCierre()" disabled>Procesar cierre</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const fmt=n=>n==null?'—':Number(n).toLocaleString('es-MX',{maximumFractionDigits:0});
+const money=n=>n==null?'—':'$'+fmt(n);
+const cls=n=>(n||0)<0?'neg':'pos';
+const jget=u=>fetch(u).then(r=>r.json());
+const jpost=(u,b)=>fetch(u,{method:'POST',headers:b?{'Content-Type':'application/json'}:{},body:b?JSON.stringify(b):undefined}).then(r=>r.json());
+const BADGE={'Cobrado OK':'b-green','Sobrepeso pendiente':'b-orange','Falta cobrar (credito)':'b-yellow','Cobrado, costo pendiente':'b-blue','Cobrado bajo costo':'b-red','Interno (14%)':'b-blue','Sin guia en sistema':'b-gray'};
+const badge=s=>`<span class="badge ${BADGE[s]||'b-gray'}">${s}</span>`;
+let VIEW='cierre';
+
+function tbl(cols, rows, rowfn, footer=''){
+  return `<div class="card"><div class="tblwrap"><table>
+    <thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+    <tbody>${rows.length?rows.map(rowfn).join(''):`<tr><td colspan="${cols.length}"><div class="empty"><h3>Sin datos</h3><p>Sube los archivos y reconcilia para ver resultados.</p></div></td></tr>`}</tbody>
+  </table></div>${footer}</div>`;
+}
+function toolbar(title, sub, actions=''){
+  return `<div class="toolbar"><div><h1 class="title">${title}</h1>${sub?`<div class="sub">${sub}</div>`:''}</div><div style="display:flex;gap:8px">${actions}</div></div>`;
+}
+
+const views = {
+  // ---------- CIERRE DE MES (home) ----------
+  async cierre(){
+    const k = (await jget('/api/status')).kpis || {};
+    const meses = await jget('/api/cierre/meses');
+    $('#view').innerHTML =
+      toolbar('Cierre de mes','Costo de paqueterías, ingreso y utilidad por periodo',
+        `<button class="btn-primary" onclick="openCierreModal()">+ Nuevo cierre de mes</button>`) +
+      `<div class="kpis">
+        <div class="kpi"><div class="lbl">Costo paqueterías</div><div class="val">${money(k.costo)}</div></div>
+        <div class="kpi green"><div class="lbl">Ingreso realizado</div><div class="val">${money(k.ingreso)}</div></div>
+        <div class="kpi"><div class="lbl">Utilidad realizada</div><div class="val">${money(k.margen)}</div></div>
+        <div class="kpi orange"><div class="lbl">Por cobrar</div><div class="val">${money(k.por_cobrar)}</div></div>
+        <div class="kpi"><div class="lbl">Cobrado por devengar</div><div class="val" style="color:var(--blue-500)">${money(k.por_devengar)}</div></div>
+      </div>` +
+      tbl(['Mes','Guías','Costo','Ingreso','Utilidad','Por cobrar','Por devengar','Estatus',''], meses, m=>
+        `<tr style="cursor:pointer" onclick="openDetalleMes('${m.mes}')" title="Ver detalle por cliente y paquetería">
+         <td><b>${m.mes}</b></td><td>${fmt(m.guias)}</td><td>${money(m.costo)}</td><td>${money(m.ingreso)}</td>
+         <td class="${cls(m.utilidad)}">${money(m.utilidad)}</td><td class="${m.por_cobrar>0?'neg':''}">${money(m.por_cobrar)}</td>
+         <td style="color:var(--blue-500)">${money(m.por_devengar)}</td>
+         <td>${m.estatus==='cerrado'?'<span class="badge b-green">Cerrado</span>':'<span class="badge b-gray">Abierto</span>'}</td>
+         <td style="white-space:nowrap">${m.estatus==='cerrado'
+            ? `<button class="btn-secondary btn-sm" onclick="event.stopPropagation();openCierreModal('${m.mes}')">Editar</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();reabrirMes('${m.mes}')">Reabrir</button>`
+            : `<button class="btn-primary btn-sm" onclick="event.stopPropagation();openCierreModal('${m.mes}')">Cerrar mes</button>`}</td></tr>`);
+  },
+  // ---------- CONFIGURACIÓN DE TARIFAS ----------
+  async tarifas(){
+    const cls = await jget('/api/tarifas/clientes');
+    window.TARCLI = cls;
+    const opts = cls.map(c=>`<option value="${c.seller_id}">${c.cliente} · ${c.filas_tarifa} tarifas</option>`).join('');
+    $('#view').innerHTML = toolbar('Configuración de tarifas','Por cliente de crédito: cobro automático (ClickHouse) o manual (tarifa por paquetería, zona y kilo)') +
+      `<div class="filters">
+         <span class="muted">Cliente:</span>
+         <select id="t-cliente" style="min-width:300px" onchange="onCliente()">${opts}</select>
+         <span class="muted" style="margin-left:16px">Cobro:</span>
+         <label style="font-size:13px;color:var(--oxford)"><input type="radio" name="cobro" value="automatica" onchange="setCobro('automatica')"> Automático (ClickHouse)</label>
+         <label style="font-size:13px;color:var(--oxford);margin-left:6px"><input type="radio" name="cobro" value="manual" onchange="setCobro('manual')"> Manual (tarifa)</label>
+       </div>
+       <div id="tar-body"></div>`;
+    onCliente();
+  },
+  // ---------- COBRANZA (generar + monitorear cobro por cliente) ----------
+  async cobranza(){
+    const meses = await jget('/api/cierre/meses');
+    if(!window.COBMES) window.COBMES=(meses.find(m=>m.estatus!=='cerrado')||meses[0]||{}).mes||'';
+    const opts = meses.map(m=>`<option value="${m.mes}" ${m.mes===COBMES?'selected':''}>${m.mes}</option>`).join('');
+    const rows = await jget('/api/cobros?mes='+COBMES);
+    const tot = rows.reduce((a,r)=>a+(r.monto||0),0);
+    const pag = rows.filter(r=>r.estatus==='pagado').reduce((a,r)=>a+(r.monto||0),0);
+    $('#view').innerHTML = toolbar('Cobranza · crédito', `Cobro a clientes de crédito · ${COBMES} · total $${fmt(tot)} · cobrado $${fmt(pag)} · (prepago ya pagó por saldo)`,
+        `<button class="btn-primary" onclick="generarCobro()">Generar cobro del mes</button>`) +
+      `<div class="filters"><span class="muted">Mes:</span><select id="cob-mes" onchange="cobMes()">${opts}</select></div>` +
+      (rows.length ? tbl(['Cliente','Guías','Monto a cobrar','Estatus','Cobro (detalle)','Factura PDF'], rows, r=>
+        `<tr><td><b>${r.cliente||'—'}</b></td><td>${fmt(r.guias)}</td><td><b>${money(r.monto)}</b></td>
+         <td><select class="cob-est" onchange="setCobEst(${r.seller_id},this.value)">
+            ${['generado','enviado','pagado'].map(e=>`<option value="${e}" ${e===r.estatus?'selected':''}>${e}</option>`).join('')}
+         </select> <span class="badge ${r.estatus==='pagado'?'b-green':r.estatus==='enviado'?'b-blue':'b-gray'}">${r.estatus}</span></td>
+         <td><a class="btn-secondary btn-sm" style="text-decoration:none" href="/api/cobro/seller?seller_id=${r.seller_id}&mes=${COBMES}">Descargar Excel</a></td>
+         <td>${r.tiene_pdf
+            ? `<a class="btn-secondary btn-sm" style="text-decoration:none;color:var(--green-700)" href="/api/cobro/pdf?seller_id=${r.seller_id}&mes=${COBMES}" target="_blank">Ver factura ✓</a>`
+            : `<label class="file"><span class="btn-secondary btn-sm">Adjuntar PDF</span><input type="file" accept=".pdf" onchange="subirPdf(${r.seller_id},this)"></label>`}</td></tr>`)
+      : `<div class="card"><div class="empty"><h3>Sin cobro generado para ${COBMES}</h3><p>Da clic en "Generar cobro del mes" para crear el cobro por cliente desde la conciliación.</p></div></div>`);
+  },
+  rep_prepago: null, // placeholders set below
+};
+
+// ---- tarifas helpers ----
+const CARRIERS=['dhl','fedex','ups','ampm','t1envios','paqueteria express','99min','estafeta','redpack'];
+window.TAR={seller_id:null,cliente:null,cobro:'automatica',carrier:'dhl'};
+function curCli(){const s=$('#t-cliente');if(!s||!s.value)return null;return (window.TARCLI||[]).find(c=>String(c.seller_id)===s.value);}
+window.onCliente=function(){
+  const c=curCli(); if(!c){$('#tar-body').innerHTML='';return;}
+  TAR.seller_id=c.seller_id; TAR.cliente=c.cliente; TAR.cobro=c.cobro_tipo||'automatica';
+  document.querySelectorAll('input[name=cobro]').forEach(r=>r.checked=(r.value===TAR.cobro));
+  renderTarBody();
+};
+window.setCobro=async function(v){
+  TAR.cobro=v;
+  await jpost('/api/cliente/cobro',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,cobro_tipo:v});
+  renderTarBody();
+};
+function renderTarBody(){
+  if(TAR.cobro!=='manual'){
+    $('#tar-body').innerHTML=`<div class="card"><div class="empty"><h3>Cobro automático</h3><p>Este cliente se cobra directo de ClickHouse (sale_price + sobrepeso). No requiere tarifa.</p></div></div>`;
+    return;
+  }
+  const copts=CARRIERS.map(c=>`<option value="${c}" ${c===TAR.carrier?'selected':''}>${c.toUpperCase()}</option>`).join('');
+  $('#tar-body').innerHTML=
+    `<div class="toolbar" style="margin-bottom:12px"><div class="filters" style="margin:0">
+        <span class="muted">Paquetería:</span><select id="t-carrier" onchange="onCarrier()">${copts}</select></div>
+      <div style="display:flex;gap:8px"><button class="btn-secondary" onclick="addTarifa()">+ Fila</button><button class="btn-primary" onclick="saveTarifas()">Guardar tarifas</button></div></div>
+     <div id="tar-grid"></div>`;
+  loadTarifas();
+}
+window.onCarrier=function(){TAR.carrier=$('#t-carrier').value;loadTarifas();};
+function tarGridHTML(rows){
+  const body=(rows.length?rows:[{}]).map((r,i)=>
+    `<tr data-i="${i}">
+      <td><input class="tz" value="${r.zona||''}" placeholder="Zona" style="width:100px"></td>
+      <td><input class="tpmin" type="number" step="any" value="${r.peso_min??''}" placeholder="0" style="width:80px;text-align:right"></td>
+      <td><input class="tpmax" type="number" step="any" value="${r.peso_max??''}" placeholder="∞" style="width:80px;text-align:right"></td>
+      <td><input class="tpre" type="number" step="any" value="${r.precio??''}" placeholder="$" style="width:90px;text-align:right"></td>
+      <td><input class="tvd" type="date" value="${(r.vigencia_desde||'').slice(0,10)}"></td>
+      <td><input class="tvh" type="date" value="${(r.vigencia_hasta||'').slice(0,10)}"></td>
+      <td><button class="btn-secondary btn-sm" onclick="delTarifa(${i})">✕</button></td></tr>`).join('');
+  return `<div class="card"><div class="tblwrap"><table>
+    <thead><tr><th>Zona</th><th>Peso min (kg)</th><th>Peso max (kg)</th><th>Precio</th><th>Vigencia desde</th><th>Vigencia hasta</th><th></th></tr></thead>
+    <tbody>${body}</tbody></table></div></div>`;
+}
+function readTarRows(){
+  return [...document.querySelectorAll('#tar-grid tr[data-i]')].map(tr=>({
+    zona:tr.querySelector('.tz').value, peso_min:tr.querySelector('.tpmin').value,
+    peso_max:tr.querySelector('.tpmax').value, precio:tr.querySelector('.tpre').value,
+    vigencia_desde:tr.querySelector('.tvd').value, vigencia_hasta:tr.querySelector('.tvh').value,
+  })).filter(r=>r.zona||r.precio);
+}
+async function loadTarifas(){
+  const rows=await jget(`/api/tarifas?seller_id=${TAR.seller_id}&carrier=${encodeURIComponent(TAR.carrier)}`);
+  $('#tar-grid').innerHTML=tarGridHTML(rows);
+}
+window.addTarifa=()=>{const rows=readTarRows();rows.push({});$('#tar-grid').innerHTML=tarGridHTML(rows);};
+window.delTarifa=i=>{const rows=readTarRows();rows.splice(i,1);$('#tar-grid').innerHTML=tarGridHTML(rows);};
+window.saveTarifas=async()=>{
+  const rows=readTarRows();
+  await jpost('/api/tarifas',{seller_id:Number(TAR.seller_id),cliente:TAR.cliente,carrier:TAR.carrier,rows});
+  alert(`Guardadas ${rows.length} tarifas (${TAR.carrier.toUpperCase()}) para ${TAR.cliente}`); loadTarifas();
+};
+
+// ---- filtro de fechas (mes envío) para reportes ----
+window.FDESDE=''; window.FHASTA='';
+function dateBar(){
+  return `<div class="filters">
+    <span class="muted">Desde:</span><input type="month" id="f-desde" value="${window.FDESDE||''}">
+    <span class="muted">Hasta:</span><input type="month" id="f-hasta" value="${window.FHASTA||''}">
+    <button class="btn-secondary btn-sm" onclick="aplicarFechas()">Aplicar</button>
+    ${(window.FDESDE||window.FHASTA)?`<button class="btn-secondary btn-sm" onclick="limpiarFechas()">Limpiar</button><span class="muted" style="font-size:12px">${window.FDESDE||'inicio'} → ${window.FHASTA||'fin'}</span>`:''}
+  </div>`;
+}
+function dateQS(){ const p=[]; if(window.FDESDE)p.push('desde='+window.FDESDE); if(window.FHASTA)p.push('hasta='+window.FHASTA); return p.join('&'); }
+window.aplicarFechas=()=>{ window.FDESDE=$('#f-desde').value; window.FHASTA=$('#f-hasta').value; (ROUTER[VIEW]||ROUTER.cierre)(); };
+window.limpiarFechas=()=>{ window.FDESDE=''; window.FHASTA=''; (ROUTER[VIEW]||ROUTER.cierre)(); };
+
+// reportes
+async function repPrepago(){
+  const rows = await jget('/api/clientes/prepago?limit=600&'+dateQS());
+  $('#view').innerHTML = toolbar('Reportes · Prepago', `${rows.length} clientes prepago`) + dateBar() +
+    tbl(['Cliente','Guías','Costo','Ingreso','Margen','%','Sobrepeso','Retornos','Recargas'], rows, r=>
+      `<tr><td>${r.cliente_real||'—'}</td><td>${fmt(r.guias)}</td><td>${money(r.costo)}</td><td>${money(r.ingreso)}</td>
+       <td class="${cls(r.margen)}">${money(r.margen)}</td><td class="${cls(r.margen)}">${r.margen_pct==null?'—':r.margen_pct+'%'}</td>
+       <td>${money(r.sobrepeso)}</td><td>${money(r.retornos)}</td><td>${money(r.recargas)}</td></tr>`);
+}
+async function repCredito(){
+  const rows = await jget('/api/clientes/credito?limit=600&'+dateQS());
+  $('#view').innerHTML = toolbar('Reportes · Crédito', `${rows.length} clientes crédito`) + dateBar() +
+    tbl(['Cliente','Guías','Costo','Facturado','Falta cobrar','Sobrepeso','Retornos'], rows, r=>
+      `<tr><td>${r.cliente_real||'—'}</td><td>${fmt(r.guias)}</td><td>${money(r.costo)}</td><td>${money(r.facturado)}</td>
+       <td class="neg">${money(r.falta_cobrar)}</td><td>${money(r.sobrepeso)}</td><td>${money(r.retornos)}</td></tr>`);
+}
+async function repCobrar(){
+  const rows = await jget('/api/por-cobrar?limit=400&'+dateQS());
+  $('#view').innerHTML = toolbar('Reportes · Por cobrar','Lo accionable para finanzas') + dateBar() +
+    tbl(['Cliente','Estatus','Guías','Costo','Falta cobrar'], rows, r=>
+      `<tr><td>${r.cliente_real||'—'}</td><td>${badge(r.estatus)}</td><td>${fmt(r.guias)}</td><td>${money(r.costo)}</td><td class="neg">${money(r.falta_cobrar)}</td></tr>`);
+}
+const G={limit:100,offset:0};
+async function repGuias(offset=0){
+  G.offset=offset;
+  const p=new URLSearchParams({limit:G.limit,offset:G.offset});
+  ['q','cliente','estatus','tipo'].forEach(k=>{const e=document.getElementById('g-'+k);if(e&&e.value)p.set(k,e.value);});
+  const qs=dateQS(); const d=await jget('/api/guias?'+p+(qs?'&'+qs:''));
+  const from=d.total?G.offset+1:0, to=Math.min(G.offset+G.limit,d.total);
+  $('#view').innerHTML = toolbar('Reportes · Detalle por guía') + dateBar() +
+    `<div class="filters">
+      <input id="g-q" placeholder="buscar guía…" value="${vof('g-q')}">
+      <input id="g-cliente" placeholder="cliente…" value="${vof('g-cliente')}">
+      <select id="g-tipo">${opt('g-tipo',['','prepago','credito','interno','sin_sistema'],['(tipo)','prepago','crédito','interno','sin sistema'])}</select>
+      <select id="g-estatus">${opt('g-estatus',['','Cobrado OK','Sobrepeso pendiente','Falta cobrar (credito)','Cobrado bajo costo','Interno (14%)','Sin guia en sistema'],['(estatus)'])}</select>
+      <button class="btn-secondary btn-sm" onclick="repGuias(0)">Filtrar</button>
+    </div>` +
+    tbl(['Guía','Cliente','Tipo','Estatus','Ret','Costo','Sale','Sobrepeso','Ingreso','Margen','Mes'], d.rows, r=>
+      `<tr><td>${r.guia}</td><td>${r.cliente_real||'—'}</td><td>${r.tipo}</td><td>${badge(r.estatus)}</td>
+       <td>${r.es_retorno?'↩︎':''}</td><td>${money(r.costo)}</td><td>${money(r.sale_price)}</td><td>${money(r.sobrepeso)}</td>
+       <td>${money(r.ingreso)}</td><td class="${cls(r.margen)}">${money(r.margen)}</td><td>${r.mes_envio||''}</td></tr>`,
+      `<div class="pager"><span class="muted">En total ${fmt(d.total)} registro(s)</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="pgbtn" ${G.offset<=0?'disabled':''} onclick="repGuias(${Math.max(0,G.offset-G.limit)})">‹</button>
+          <span>${fmt(from)}–${fmt(to)}</span>
+          <button class="pgbtn" ${to>=d.total?'disabled':''} onclick="repGuias(${G.offset+G.limit})">›</button>
+        </div></div>`);
+  const q=$('#g-q'); if(q) q.addEventListener('keydown',e=>{if(e.key==='Enter')repGuias(0)});
+}
+function vof(id){const e=document.getElementById(id);return e?e.value.replace(/"/g,'&quot;'):'';}
+function opt(id,vals,labels){const cur=(document.getElementById(id)||{}).value||'';labels=labels||vals;
+  return vals.map((v,i)=>`<option value="${v}" ${v===cur?'selected':''}>${labels[i]||v}</option>`).join('');}
+
+// acciones globales expuestas
+window.cerrarMes=async m=>{ if(!confirm('¿Cerrar el mes '+m+'? Guarda el snapshot del periodo.'))return; await jpost('/api/cierre/cerrar?mes='+m); views.cierre(); };
+window.repGuias=repGuias;
+
+// ---- modal: cierre de mes ----
+const SUPPORTED=['dhl'];
+window.openCierreModal=async function(mes){
+  const meses=await jget('/api/cierre/meses');
+  const m=mes||(meses.find(x=>x.estatus!=='cerrado')||meses[0]||{}).mes||'';
+  $('#cm-mes').value=m;
+  $('#cm-title').textContent = mes ? `Editar cierre · ${mes}` : 'Cierre de mes';
+  $('#cm-carriers').innerHTML=CARRIERS.map(c=>{
+    const sup=SUPPORTED.includes(c);
+    return `<div class="crow${sup?'':' off'}" data-c="${c}">
+       <label class="nm"><input type="checkbox" class="cm-chk" data-c="${c}" ${sup?'checked':'disabled'} onchange="toggleCarrier('${c}')"> ${c.toUpperCase()}
+         ${sup?'<span class="badge b-green" style="font-size:9px;padding:1px 6px">Listo</span>':'<span class="badge b-gray" style="font-size:9px;padding:1px 6px">Próximamente</span>'}</label>
+       <label class="file"><span class="btn-secondary btn-sm" ${sup?'':'style="pointer-events:none;opacity:.45"'}>Subir Excel</span><input type="file" class="cm-file" data-c="${c}" accept=".xlsx" ${sup?'':'disabled'} onchange="cmFile('${c}')"></label>
+       <span class="fname" data-c="${c}"></span>
+     </div>`;}).join('');
+  updateCierreCount();
+  $('#modal').classList.add('show');
+};
+window.reabrirMes=async function(mes){ if(!confirm('¿Reabrir '+mes+'? Volverá a estatus abierto para poder editarlo.'))return; await jpost('/api/cierre/reabrir?mes='+mes); if(VIEW==='cierre')views.cierre(); };
+// ---- cobranza ----
+window.cobMes=function(){ window.COBMES=$('#cob-mes').value; views.cobranza(); };
+window.generarCobro=async function(){
+  if(!confirm('¿Generar el cobro de '+COBMES+'? Crea el monto a cobrar por cliente desde la conciliación.'))return;
+  const r=await jpost('/api/cobro/generar?mes='+COBMES);
+  alert(`Cobro generado para ${COBMES}: ${r.sellers} clientes · $${fmt(r.monto_total)}`); views.cobranza();
+};
+window.setCobEst=async function(sid,est){ await jpost('/api/cobro/estatus',{seller_id:sid,mes:COBMES,estatus:est}); views.cobranza(); };
+window.subirPdf=async function(sid,input){
+  const f=input.files[0]; if(!f)return;
+  const fd=new FormData(); fd.append('file',f);
+  $('#job').innerHTML=`<span class="dot run"></span>subiendo factura…`;
+  await fetch(`/api/cobro/pdf?seller_id=${sid}&mes=${COBMES}`,{method:'POST',body:fd});
+  $('#job').innerHTML=`<span class="dot ok"></span>factura adjuntada`; views.cobranza();
+};
+// ---- detalle de cierre (drill-down por cliente y paquetería) ----
+const DETCOLS=['Cliente','Paquetería','Guías','Costo','Cobro','Margen'];
+const detRow=r=>`<tr><td>${r.cliente_real||'—'}</td><td><span class="badge b-gray">${(r.carrier||'').toUpperCase()}</span></td>
+   <td>${fmt(r.guias)}</td><td>${money(r.costo)}</td><td><b>${money(r.cobro)}</b></td>
+   <td class="${cls(r.margen)}">${money(r.margen)}</td></tr>`;
+window.openDetalleMes=function(mes){ window.DETMES=mes; VIEW='cierre-detalle'; document.querySelectorAll('#nav a').forEach(a=>a.classList.remove('active')); detalleMes(); };
+async function detalleMes(){
+  const mes=window.DETMES;
+  const rows=await jget('/api/cierre/detalle?mes='+mes); window.DETROWS=rows;
+  const tc=rows.reduce((a,r)=>a+(r.costo||0),0), ti=rows.reduce((a,r)=>a+(r.cobro||0),0);
+  $('#view').innerHTML = toolbar('Detalle de cierre · '+mes,
+      `${rows.length} cliente × paquetería · costo $${fmt(tc)} · cobro $${fmt(ti)} · margen $${fmt(ti-tc)}`,
+      `<a class="btn btn-secondary" style="text-decoration:none" href="/api/cierre/detalle/excel?mes=${mes}">Descargar detalle</a>
+       <button class="btn-secondary" onclick="go('cierre')">← Volver</button>`) +
+    `<div class="filters"><input id="dm-q" placeholder="buscar cliente…" oninput="filtraDetalle()" style="min-width:240px"></div>` +
+    `<div id="dm-tbl">`+tbl(DETCOLS, rows, detRow)+`</div>`;
+}
+window.filtraDetalle=function(){
+  const q=($('#dm-q').value||'').toLowerCase();
+  const rows=(window.DETROWS||[]).filter(r=>(r.cliente_real||'').toLowerCase().includes(q));
+  $('#dm-tbl').innerHTML=tbl(DETCOLS, rows, detRow);
+};
+window.closeModal=()=>$('#modal').classList.remove('show');
+function updateCierreCount(){
+  const n=[...document.querySelectorAll('.cm-chk')].filter(c=>c.checked)
+    .filter(c=>{const fi=document.querySelector(`.cm-file[data-c="${c.dataset.c}"]`);return fi&&fi.files[0];}).length;
+  const b=$('#cm-proc'); if(b){b.textContent=n?`Procesar cierre (${n})`:'Procesar cierre';b.disabled=!n;}
+}
+window.toggleCarrier=c=>{
+  const chk=document.querySelector(`.cm-chk[data-c="${c}"]`);
+  document.querySelector(`.crow[data-c="${c}"]`).classList.toggle('off',!chk.checked);
+  document.querySelector(`.cm-file[data-c="${c}"]`).disabled=!chk.checked;
+  updateCierreCount();
+};
+window.cmFile=c=>{const fi=document.querySelector(`.cm-file[data-c="${c}"]`);
+  document.querySelector(`.fname[data-c="${c}"]`).textContent=fi.files[0]?('✓ '+fi.files[0].name):'';
+  updateCierreCount();};
+async function waitIdle(){for(let i=0;i<800;i++){const s=await jget('/api/status');
+  if(!Object.values(s.jobs||{}).some(j=>j.status==='running'))return; await new Promise(r=>setTimeout(r,1500));}}
+window.procesarCierre=async function(){
+  const mes=$('#cm-mes').value; if(!mes){alert('Selecciona el mes a cerrar');return;}
+  const sel=[...document.querySelectorAll('.cm-chk')].filter(c=>c.checked).map(c=>c.dataset.c)
+    .filter(c=>{const fi=document.querySelector(`.cm-file[data-c="${c}"]`);return fi&&fi.files[0];});
+  if(!sel.length){alert('Sube al menos un Excel de paquetería (y deja seleccionadas solo las que apliquen).');return;}
+  closeModal();
+  for(const c of sel){
+    const fi=document.querySelector(`.cm-file[data-c="${c}"]`);
+    const fd=new FormData(); fd.append('file',fi.files[0]);
+    $('#job').innerHTML=`<span class="dot run"></span>subiendo ${c.toUpperCase()}…`;
+    const r=await fetch(`/api/upload/carrier?carrier=${c}&reset=true`,{method:'POST',body:fd}).then(x=>x.json()).catch(()=>({error:'fallo subida'}));
+    if(r&&r.error){$('#job').innerHTML=`<span class="dot err"></span>${c.toUpperCase()}: ${r.error}`;}
+    await waitIdle();
+  }
+  $('#job').innerHTML=`<span class="dot run"></span>reconciliando…`; await jpost('/api/reconcile'); await waitIdle();
+  await jpost('/api/cierre/cerrar?mes='+mes);
+  $('#job').innerHTML=`<span class="dot run"></span>generando cobro de crédito…`; await jpost('/api/cobro/generar?mes='+mes);
+  $('#job').innerHTML=`<span class="dot ok"></span>cierre de ${mes} listo`;
+  if(VIEW==='cierre')views.cierre(); else go('cierre');
+};
+
+// router
+const ROUTER={cierre:()=>views.cierre(),'cobranza':()=>views.cobranza(),'tarifas':()=>views.tarifas(),
+  'rep-prepago':repPrepago,'rep-credito':repCredito,'rep-cobrar':repCobrar,'rep-guias':()=>repGuias(0)};
+function go(v){VIEW=v;document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.v===v));(ROUTER[v]||ROUTER.cierre)();}
+document.querySelectorAll('#nav a').forEach(a=>a.onclick=()=>go(a.dataset.v));
+
+// jobs / acciones de datos
+async function poll(){
+  const s=await jget('/api/status'); const jobs=s.jobs||{};
+  const run=Object.values(jobs).find(j=>j.status==='running');
+  const last=Object.values(jobs).sort((a,b)=>(b.finished||'').localeCompare(a.finished||'')).find(j=>j.status!=='running');
+  const el=$('#job');
+  if(run)el.innerHTML=`<span class="dot run"></span>${run.name}…`;
+  else if(last){const c=last.status==='error'?'err':'ok';el.innerHTML=`<span class="dot ${c}"></span>${(last.message||'').split('\\n')[0].slice(0,34)}`;}
+  const b=$('#b-sync'); if(b)b.disabled=!!run;
+}
+$('#b-sync').onclick=async()=>{await jpost('/api/sync-ch?desde='+$('#desde').value);poll();};
+function wireUploads(){
+  const c=$('#f-carrier'), cl=$('#f-cliente');
+  if(c)c.onchange=e=>up(e.target,'/api/upload/carrier?carrier=dhl');
+  if(cl)cl.onchange=e=>up(e.target,'/api/upload/cliente');
+}
+async function up(input,url){const f=input.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
+  $('#job').innerHTML=`<span class="dot run"></span>subiendo ${f.name}…`;
+  await fetch(url+(url.includes('?')?'&':'?')+'reset=true',{method:'POST',body:fd});input.value='';poll();}
+
+go('cierre');
+poll(); setInterval(poll,3000);
+</script>
+</body>
+</html>
