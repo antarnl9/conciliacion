@@ -412,6 +412,13 @@ window.gridDel=(gid,i)=>{ const r=gridReadRows(gid,true); r.splice(i,1); GRIDS[g
 window.COSTC='dhl'; window.COSTSVCS=[]; window.COSTSVC='';
 const enc=encodeURIComponent;
 // Sugerencias de recargos por paquetería (columna del Acre identificada). Se pre-cargan si no hay mapeo.
+// Servicios predefinidos por paquetería: {nombre visible, codigo = valor TAL CUAL en el Acre (producto)}.
+// La tarifa se guarda/cruza por el código, así el cobro es correcto aunque el nombre sea cosmético.
+const SERVICIOS_SUG={
+  dhl:[{nombre:'Next Day',codigo:'N'},{nombre:'Ground',codigo:'G'}],
+  fedex:[{nombre:'Express Saver',codigo:'Express Saver'},{nombre:'Standard Overnight',codigo:'Standard Overnight'}],
+  paquete_express:[{nombre:'Standard',codigo:'Standard'}],
+};
 const RECARGOS_SUG={
   dhl:[{concepto:'Zona extendida',columna:'OO'},{concepto:'Sobredimensión',columna:'YB'},{concepto:'Sobrepeso',columna:'YY'},{concepto:'Multipieza',columna:'YE'}],
   fedex:[{concepto:'Zona extendida',columna:'ODA'},{concepto:'Zona extendida',columna:'OPA'},{concepto:'Sobredimensión',columna:'Oversize_Charge'}],
@@ -430,7 +437,7 @@ views.costos=async function(){
            <div><span class="lblform">Vigencia hasta</span><input type="date" id="cost-vh"></div>
          </div>
        </div>
-       <div class="muted" style="font-size:12px;margin-bottom:8px">Elige el <b>tipo de servicio</b> (vienen del Acre, tal cual) y captura su tarifa zona/kilo.</div>
+       <div class="muted" style="font-size:12px;margin-bottom:8px">Elige el <b>tipo de servicio</b> y captura su tarifa zona/kilo. Se liga por el valor del Acre (entre paréntesis al pasar el mouse), así el cobro es exacto.</div>
        <div id="svc-tabs" style="margin-bottom:10px"></div>
        <div id="cost-grid"></div>
        <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('cost-grid')">+ Fila</button><button class="btn-primary" onclick="saveCostos()">Guardar tarifa del servicio</button></div>
@@ -450,15 +457,15 @@ views.costos=async function(){
   await loadCostos();
 };
 window.onCostCarrier=function(){ COSTC=$('#cost-carrier').value; COSTSVC=''; loadCostos(); };
+function svcNombre(code){ const s=COSTSVCS.find(x=>x.codigo===code); return s?s.nombre:code; }
 function renderSvcTabs(){
-  const tabs=COSTSVCS.map((s,i)=>`<button class="seg-tab ${s===COSTSVC?'active':''}" onclick="selSvc(${i})">${s}</button>`).join('');
-  $('#svc-tabs').innerHTML=(COSTSVCS.length?tabs:`<span class="muted" style="font-size:12.5px">Sin servicios aún — sube un Acre de ${carLbl(COSTC)} para ver sus tipos de servicio. </span>`)
-    +`<button class="btn-secondary btn-sm" onclick="addSvc()">+ servicio manual</button>`;
+  const tabs=COSTSVCS.map((s,i)=>`<button class="seg-tab ${s.codigo===COSTSVC?'active':''}" onclick="selSvc(${i})" title="En el Acre: ${s.codigo}">${s.nombre}</button>`).join('');
+  $('#svc-tabs').innerHTML=tabs+`<button class="btn-secondary btn-sm" onclick="addSvc()">+ servicio</button>`;
 }
-window.selSvc=async function(i){ COSTSVC=COSTSVCS[i]; renderSvcTabs(); await loadCostoSvc(); };
+window.selSvc=async function(i){ COSTSVC=COSTSVCS[i].codigo; renderSvcTabs(); await loadCostoSvc(); };
 window.addSvc=function(){
-  const s=(prompt('Nombre del servicio — debe coincidir EXACTO con el Acre (columna Producto/Servicio):')||'').trim();
-  if(!s)return; if(!COSTSVCS.includes(s))COSTSVCS.push(s); COSTSVC=s; renderSvcTabs(); loadCostoSvc();
+  const code=(prompt('Valor del servicio TAL CUAL viene en el Acre (columna Producto/Servicio):')||'').trim();
+  if(!code)return; if(!COSTSVCS.some(s=>s.codigo===code))COSTSVCS.push({nombre:code,codigo:code}); COSTSVC=code; renderSvcTabs(); loadCostoSvc();
 };
 async function loadCostoSvc(){
   const cos=COSTSVC?await jget(`/api/costos?carrier=${enc(COSTC)}&servicio=${enc(COSTSVC)}`):[];
@@ -466,10 +473,13 @@ async function loadCostoSvc(){
     cos.map(r=>({zona:r.zona,peso_min:r.peso_min,peso_max:r.peso_max,costo:r.costo})));
 }
 async function loadCostos(){
-  const [svcs,cosAll,fue,rec]=await Promise.all([
-    jget('/api/servicios?carrier='+enc(COSTC)), jget('/api/costos?carrier='+enc(COSTC)),
-    jget('/api/combustible?carrier='+enc(COSTC)), jget('/api/recargos-mapeo?carrier='+enc(COSTC))]);
-  COSTSVCS=svcs||[]; if(!COSTSVC||!COSTSVCS.includes(COSTSVC)) COSTSVC=COSTSVCS[0]||'';
+  const [cosAll,fue,rec]=await Promise.all([
+    jget('/api/costos?carrier='+enc(COSTC)), jget('/api/combustible?carrier='+enc(COSTC)), jget('/api/recargos-mapeo?carrier='+enc(COSTC))]);
+  // servicios: predefinidos + los que ya tengan tarifa configurada (sin depender del Acre)
+  COSTSVCS=(SERVICIOS_SUG[COSTC]||[]).slice();
+  const have=new Set(COSTSVCS.map(s=>s.codigo));
+  [...new Set(cosAll.map(r=>r.servicio).filter(Boolean))].forEach(code=>{ if(!have.has(code))COSTSVCS.push({nombre:code,codigo:code}); });
+  if(!COSTSVC||!COSTSVCS.some(s=>s.codigo===COSTSVC)) COSTSVC=(COSTSVCS[0]&&COSTSVCS[0].codigo)||'';
   $('#cost-vd').value=((cosAll[0]&&cosAll[0].vigencia_desde)||'').slice(0,10);
   $('#cost-vh').value=((cosAll[0]&&cosAll[0].vigencia_hasta)||'').slice(0,10);
   renderSvcTabs(); await loadCostoSvc();
@@ -479,11 +489,10 @@ async function loadCostos(){
     rec.length ? rec.map(r=>({concepto:r.concepto||'',columna:r.columna||''})) : (RECARGOS_SUG[COSTC]||[]).map(r=>({concepto:r.concepto,columna:r.columna})));
 }
 window.saveCostos=async function(){
-  if(!COSTSVC){alert('Elige o agrega un servicio primero (las pestañas vienen del Acre).');return;}
+  if(!COSTSVC){alert('Elige o agrega un servicio primero.');return;}
   const rows=gridReadRows('cost-grid');
   const r=await jpost('/api/costos',{carrier:COSTC,servicio:COSTSVC,vigencia_desde:$('#cost-vd').value||null,vigencia_hasta:$('#cost-vh').value||null,rows});
-  $('#job').innerHTML=`<span class="dot ok"></span>tarifa ${carLbl(COSTC)} · ${COSTSVC} (${r.filas})`;
-  if(!COSTSVCS.includes(COSTSVC)){COSTSVCS.push(COSTSVC);renderSvcTabs();}
+  $('#job').innerHTML=`<span class="dot ok"></span>tarifa ${carLbl(COSTC)} · ${svcNombre(COSTSVC)} (${r.filas})`;
 };
 window.saveCombustible=async function(){
   const rows=gridReadRows('fuel-grid').map(r=>({vigencia_desde:r.vigencia_desde||null,vigencia_hasta:r.vigencia_hasta||null,pct:r.pct===''?null:Number(r.pct)/100}));
