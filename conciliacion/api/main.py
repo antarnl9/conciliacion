@@ -8,11 +8,11 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import config, db, ch_sync, reconcile, export
+from .. import config, db, ch_sync, reconcile, export, supa
 from ..parsers import PARSERS
 from . import jobs
 
@@ -20,6 +20,26 @@ UI_DIR = config.ROOT / "ui"            # .../conciliacion/ui (local) y /app/ui (
 UPLOADS = config.DATA_DIR / "uploads"
 
 app = FastAPI(title="Conciliación T1", version="0.1.0")
+
+
+@app.middleware("http")
+async def auth_mw(request: Request, call_next):
+    """Protege /api/* con el login de Supabase (si está configurado)."""
+    path = request.url.path
+    if not path.startswith("/api/") or path in ("/api/config", "/api/health") or not supa.enabled():
+        return await call_next(request)
+    auth = request.headers.get("authorization", "")
+    token = auth[7:] if auth.lower().startswith("bearer ") else (request.query_params.get("token") or "")
+    if not supa.verify_token(token):
+        return JSONResponse({"error": "no autorizado"}, status_code=401)
+    return await call_next(request)
+
+
+@app.get("/api/config")
+def app_config():
+    """Config pública para el frontend (URL + llave pública de Supabase)."""
+    s = config.supabase_settings()
+    return {"auth_enabled": s["enabled"], "supabase_url": s["url"], "supabase_key": s["public"]}
 
 
 # ---------- helpers ----------
@@ -539,17 +559,22 @@ def cobro_seller(seller_id: int, mes: str):
 
 @app.post("/api/cobro/pdf")
 def subir_pdf(seller_id: int = Query(...), mes: str = Query(...), file: UploadFile = File(...)):
-    """Adjunta el PDF de la factura de un cliente para el mes."""
-    dest_dir = config.DATA_DIR / "uploads" / "pdf"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / f"{seller_id}_{mes}_{file.filename}"
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    """Adjunta el PDF de la factura de un cliente (Supabase Storage, o disco local)."""
+    content = file.file.read()
+    if supa.enabled():
+        path = f"{seller_id}/{mes}/{file.filename}"
+        supa.upload(path, content, "application/pdf")
+    else:
+        dest_dir = config.DATA_DIR / "uploads" / "pdf"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        path = str(dest_dir / f"{seller_id}_{mes}_{file.filename}")
+        with open(path, "wb") as f:
+            f.write(content)
     con = db.connect()
     try:
         con.execute("DELETE FROM cobro_adjuntos WHERE seller_id = ? AND mes = ?", [seller_id, mes])
         con.execute("INSERT INTO cobro_adjuntos VALUES (?,?,?,?, now())",
-                    [seller_id, mes, file.filename, str(dest)])
+                    [seller_id, mes, file.filename, path])
         return {"ok": True, "filename": file.filename}
     finally:
         con.close()
@@ -563,6 +588,9 @@ def ver_pdf(seller_id: int, mes: str):
                           [seller_id, mes]).fetchone()
         if not row:
             return JSONResponse({"error": "sin PDF"}, 404)
+        if supa.enabled():
+            url = supa.signed_url(row[0])
+            return RedirectResponse(url) if url else JSONResponse({"error": "no se pudo firmar"}, 500)
         return FileResponse(row[0], filename=row[1], media_type="application/pdf")
     finally:
         con.close()

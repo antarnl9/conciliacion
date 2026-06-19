@@ -47,6 +47,27 @@ def ch_settings() -> dict:
         database=e.get("CH_DATABASE", "t1_envios"),
     )
 
+# --- Supabase (Auth + Storage) ---
+def _load_env(prefix: str) -> dict:
+    env: dict = {}
+    if DATA_PLATFORM_ENV.exists():
+        env.update({k: v for k, v in dotenv_values(DATA_PLATFORM_ENV).items() if v})
+    if LOCAL_ENV.exists():
+        env.update({k: v for k, v in dotenv_values(LOCAL_ENV).items() if v})
+    env.update({k: v for k, v in os.environ.items() if k.startswith(prefix)})
+    return env
+
+
+def supabase_settings() -> dict:
+    e = _load_env("SUPABASE_")
+    url = (e.get("SUPABASE_URL") or "").rstrip("/")
+    pub = e.get("SUPABASE_PUBLIC_KEY") or ""
+    sec = e.get("SUPABASE_SECRET_KEY") or ""
+    return {"url": url, "public": pub, "secret": sec,
+            "bucket": e.get("SUPABASE_BUCKET", "facturas"),
+            "enabled": bool(url and pub and sec)}
+
+
 # --- Reglas de negocio ---
 # Cuentas internas inter-empresa: el sistema guarda sale_price=0 y se cobran por Acre
 # con un margen pactado. El ingreso real = costo * (1 + margen).

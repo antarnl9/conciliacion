@@ -92,9 +92,29 @@
   .crow .nm{flex:1;display:flex;align-items:center;gap:9px;font-weight:600;color:var(--oxford)}
   .crow.off{opacity:.4}
   .crow .fname{font-size:11.5px;color:var(--green-700);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .login-ov{position:fixed;inset:0;background:#f3f5f8;display:none;align-items:center;justify-content:center;z-index:1000}
+  .login-ov.show{display:flex}
+  .login-card{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:34px 30px;width:340px;box-shadow:0 12px 44px rgba(0,0,0,.10)}
+  .login-card h2{margin:14px 0 4px;font-size:20px;color:var(--heading)}
+  .login-card .sub{margin:0 0 20px;font-size:13px;color:var(--gray-600)}
+  .login-card input{width:100%;margin-bottom:12px;padding:11px 12px;border:1px solid var(--gray-200);border-radius:9px;font-size:14px;font-family:inherit}
+  .login-card .err{color:var(--red);font-size:12.5px;min-height:17px;margin-bottom:6px}
+  .login-card button{width:100%}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+<div class="login-ov" id="login">
+  <form class="login-card" onsubmit="return doLogin(event)">
+    <div class="brand"><span class="mark">T1</span> Conciliación</div>
+    <h2>Iniciar sesión</h2>
+    <div class="sub">Acceso del equipo de finanzas.</div>
+    <input type="email" id="lg-email" placeholder="correo@t1envios.com" autocomplete="username" required>
+    <input type="password" id="lg-pass" placeholder="Contraseña" autocomplete="current-password" required>
+    <div class="err" id="lg-err"></div>
+    <button class="btn-primary" type="submit" id="lg-btn">Entrar</button>
+  </form>
+</div>
 <aside>
   <div class="brand"><span class="mark">T1</span> Conciliación</div>
   <nav id="nav">
@@ -112,6 +132,7 @@
     <div class="t" style="font-size:11px;color:var(--gray-600)">Datos</div>
     <div style="display:flex;gap:6px;align-items:center"><span class="muted" style="font-size:11px">Desde</span><input type="date" id="desde" value="2025-09-01" style="flex:1;min-width:0"><button class="btn-secondary btn-sm" id="b-sync" title="Sincronizar ClickHouse">Sincronizar</button></div>
     <div class="job" id="job"></div>
+    <div id="logout-row" style="display:none;margin-top:8px"><a onclick="doLogout()" style="font-size:11px;color:var(--gray-600);cursor:pointer">Cerrar sesión</a></div>
   </div>
 </aside>
 
@@ -135,6 +156,16 @@
 </div>
 
 <script>
+let TOKEN=null, SB=null, AUTH=false;
+const _fetch=window.fetch.bind(window);
+// Inyecta el token de Supabase a toda llamada /api/*.
+window.fetch=(u,o={})=>{
+  if(typeof u==='string' && u.startsWith('/api/') && TOKEN)
+    o.headers={...(o.headers||{}), Authorization:'Bearer '+TOKEN};
+  return _fetch(u,o);
+};
+// Los <a href> de descarga no mandan headers: les agrega ?token=.
+const dl=u=>TOKEN?u+(u.includes('?')?'&':'?')+'token='+encodeURIComponent(TOKEN):u;
 const $=s=>document.querySelector(s);
 const fmt=n=>n==null?'—':Number(n).toLocaleString('es-MX',{maximumFractionDigits:0});
 const money=n=>n==null?'—':'$'+fmt(n);
@@ -212,9 +243,9 @@ const views = {
          <td><select class="cob-est" onchange="setCobEst(${r.seller_id},this.value)">
             ${['generado','enviado','pagado'].map(e=>`<option value="${e}" ${e===r.estatus?'selected':''}>${e}</option>`).join('')}
          </select> <span class="badge ${r.estatus==='pagado'?'b-green':r.estatus==='enviado'?'b-blue':'b-gray'}">${r.estatus}</span></td>
-         <td><a class="btn-secondary btn-sm" style="text-decoration:none" href="/api/cobro/seller?seller_id=${r.seller_id}&mes=${COBMES}">Descargar Excel</a></td>
+         <td><a class="btn-secondary btn-sm" style="text-decoration:none" href="${dl(`/api/cobro/seller?seller_id=${r.seller_id}&mes=${COBMES}`)}">Descargar Excel</a></td>
          <td>${r.tiene_pdf
-            ? `<a class="btn-secondary btn-sm" style="text-decoration:none;color:var(--green-700)" href="/api/cobro/pdf?seller_id=${r.seller_id}&mes=${COBMES}" target="_blank">Ver factura ✓</a>`
+            ? `<a class="btn-secondary btn-sm" style="text-decoration:none;color:var(--green-700)" href="${dl(`/api/cobro/pdf?seller_id=${r.seller_id}&mes=${COBMES}`)}" target="_blank">Ver factura ✓</a>`
             : `<label class="file"><span class="btn-secondary btn-sm">Adjuntar PDF</span><input type="file" accept=".pdf" onchange="subirPdf(${r.seller_id},this)"></label>`}</td></tr>`)
       : `<div class="card"><div class="empty"><h3>Sin cobro generado para ${COBMES}</h3><p>Da clic en "Generar cobro del mes" para crear el cobro por cliente desde la conciliación.</p></div></div>`);
   },
@@ -400,7 +431,7 @@ async function detalleMes(){
   const tc=rows.reduce((a,r)=>a+(r.costo||0),0), ti=rows.reduce((a,r)=>a+(r.cobro||0),0);
   $('#view').innerHTML = toolbar('Detalle de cierre · '+mes,
       `${rows.length} cliente × paquetería · costo $${fmt(tc)} · cobro $${fmt(ti)} · margen $${fmt(ti-tc)}`,
-      `<a class="btn btn-secondary" style="text-decoration:none" href="/api/cierre/detalle/excel?mes=${mes}">Descargar detalle</a>
+      `<a class="btn btn-secondary" style="text-decoration:none" href="${dl(`/api/cierre/detalle/excel?mes=${mes}`)}">Descargar detalle</a>
        <button class="btn-secondary" onclick="go('cierre')">← Volver</button>`) +
     `<div class="filters"><input id="dm-q" placeholder="buscar cliente…" oninput="filtraDetalle()" style="min-width:240px"></div>` +
     `<div id="dm-tbl">`+tbl(DETCOLS, rows, detRow)+`</div>`;
@@ -474,8 +505,37 @@ async function up(input,url){const f=input.files[0];if(!f)return;const fd=new Fo
   $('#job').innerHTML=`<span class="dot run"></span>subiendo ${f.name}…`;
   await fetch(url+(url.includes('?')?'&':'?')+'reset=true',{method:'POST',body:fd});input.value='';poll();}
 
-go('cierre');
-poll(); setInterval(poll,3000);
+function startApp(){
+  go('cierre');
+  poll(); setInterval(poll,3000);
+}
+function afterAuth(){
+  $('#login').classList.remove('show');
+  const lr=$('#logout-row'); if(lr)lr.style.display='block';
+  startApp();
+}
+window.doLogin=async function(ev){
+  ev.preventDefault();
+  const email=$('#lg-email').value.trim(), pass=$('#lg-pass').value;
+  const btn=$('#lg-btn'); btn.disabled=true; $('#lg-err').textContent='';
+  const {data,error}=await SB.auth.signInWithPassword({email,password:pass});
+  btn.disabled=false;
+  if(error||!data.session){ $('#lg-err').textContent='Correo o contraseña incorrectos.'; return false; }
+  TOKEN=data.session.access_token; afterAuth(); return false;
+};
+window.doLogout=async function(){ if(SB)await SB.auth.signOut(); location.reload(); };
+async function boot(){
+  let cfg={};
+  try{ cfg=await _fetch('/api/config').then(r=>r.json()); }catch(e){}
+  AUTH=!!cfg.auth_enabled;
+  if(!AUTH){ startApp(); return; }           // sin Supabase: app directa (dev local)
+  SB=window.supabase.createClient(cfg.supabase_url, cfg.supabase_key);
+  SB.auth.onAuthStateChange((_e,session)=>{ if(session)TOKEN=session.access_token; });
+  const {data}=await SB.auth.getSession();
+  if(data.session){ TOKEN=data.session.access_token; afterAuth(); }
+  else { $('#login').classList.add('show'); }
+}
+boot();
 </script>
 </body>
 </html>
