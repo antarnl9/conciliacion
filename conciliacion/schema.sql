@@ -70,8 +70,8 @@ CREATE TABLE IF NOT EXISTS config_credito (
     dias_credito INTEGER    -- plazo de pago en días (default 30) para vencimiento/atraso
 );
 
--- Tarifas por cliente: matriz (zona x rango de kilo) -> precio, con vigencia.
--- El archivo de la paqueteria ya trae zona y kilo por guia; aqui solo está el precio a cobrar.
+-- Tarifas FLAT por cliente: matriz (zona x rango de kilo) -> precio fijo, con vigencia.
+-- Solo para metodo='flat'. Los demas metodos derivan del costo (costos_tarifa) + margen.
 CREATE TABLE IF NOT EXISTS tarifas (
     seller_id      BIGINT,
     cliente        VARCHAR,
@@ -82,6 +82,40 @@ CREATE TABLE IF NOT EXISTS tarifas (
     precio         DOUBLE,
     vigencia_desde DATE,
     vigencia_hasta DATE
+);
+
+-- COSTOS: rate card de la paqueteria (zona x rango de kilo -> costo). Vigencia GLOBAL por version.
+CREATE TABLE IF NOT EXISTS costos_tarifa (
+    carrier        VARCHAR,
+    zona           VARCHAR,
+    peso_min       DOUBLE,
+    peso_max       DOUBLE,
+    costo          DOUBLE,
+    vigencia_desde DATE,
+    vigencia_hasta DATE
+);
+
+-- Combustible (fuel) por paqueteria y periodo (semanal o mensual = rango de fechas). pct ej 0.16.
+CREATE TABLE IF NOT EXISTS combustible (
+    carrier        VARCHAR,
+    vigencia_desde DATE,
+    vigencia_hasta DATE,
+    pct            DOUBLE
+);
+
+-- Margen por ZONA por cliente (metodo='margen_zona').
+CREATE TABLE IF NOT EXISTS margen_zona (
+    seller_id BIGINT,
+    zona      VARCHAR,
+    margen    DOUBLE
+);
+
+-- Margen por RANGO DE KILO por cliente (metodo='margen_kilo').
+CREATE TABLE IF NOT EXISTS margen_kilo (
+    seller_id BIGINT,
+    peso_min  DOUBLE,
+    peso_max  DOUBLE,
+    margen    DOUBLE
 );
 
 -- Cierres de mes (snapshot del periodo).

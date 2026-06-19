@@ -55,13 +55,14 @@ def test_reglas_de_cobro(con):
     assert r['PREP_REPESO'] == 'Extra por cobrar'      # re-peso: extra a costo+margen
     assert r['INTERNO'] == 'Interno (14%)'
     assert r['CRED_AUTO'] == 'Cobrado OK'              # credito automatica (130>=100*1.14)
-    assert r['CRED_MANUAL'] == 'Cobrado OK'            # credito manual -> tarifa $150
-    assert r['CRED_MAN_SINTAR'] == 'Falta cobrar (credito)'  # manual sin tarifa para zona 9
+    assert r['CRED_MANUAL'] == 'Cobrado OK'            # credito flat -> tarifa $150 + IVA
+    assert r['CRED_MAN_SINTAR'] == 'Falta cobrar (credito)'  # flat sin tarifa para zona 9
     assert r['SIN_SIS'] == 'Sin guia en sistema'
     assert r['RET1'] == 'Extra por cobrar'             # retorno -> se cobra completo a costo+margen
 
     g = lambda q: con.execute(q).fetchone()[0]
-    assert abs(g("SELECT ingreso FROM reconciliacion WHERE guia='CRED_MANUAL'") - 150) < .01
+    # flat: tarifa 150 + IVA 16% = 174
+    assert abs(g("SELECT ingreso FROM reconciliacion WHERE guia='CRED_MANUAL'") - 174) < .01
     assert abs(g("SELECT margen FROM reconciliacion WHERE guia='INTERNO'") - 14) < .01
     # re-peso: ingreso sube a piso costo*1.14 = 228, margen = 28; extra = 228 - (60+30) = 138
     assert abs(g("SELECT ingreso FROM reconciliacion WHERE guia='PREP_REPESO'") - 228) < .01

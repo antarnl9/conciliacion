@@ -86,6 +86,9 @@ MARGEN_EXTRA_DEFAULT = 0.14
 # Plazo de crédito por defecto (días) para vencimiento y días de atraso.
 DIAS_CREDITO_DEFAULT = 30
 
+# IVA aplicado a la tarifa del cliente (precio = base × (1+fuel) × (1+margen) × (1+IVA)).
+IVA_DEFAULT = 0.16
+
 # Modelos de pago en ClickHouse (seller_configuration_name)
 CONFIG_PREPAGO = "Prepago"               # cobra al día con saldo; ingreso = sale_price + sobrepeso
 CONFIG_CREDITO = "Prepago sin saldo"     # cobra por Acre con rezago; ingreso = factura real subida

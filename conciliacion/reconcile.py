@@ -8,7 +8,7 @@ Reglas (de la auditoría):
 """
 from __future__ import annotations
 
-from . import config
+from . import config, pricing
 
 
 def _internal_condition(col: str = "seller_name") -> str:
@@ -32,6 +32,11 @@ def build(con) -> int:
     internal = _internal_condition()
     margin = _internal_margin_case()
     md = config.MARGEN_EXTRA_DEFAULT
+    # método normalizado del cliente ('manual' viejo == 'flat') y precio resultante por guía
+    metodo_expr = "(CASE WHEN cfg.cobro_tipo='manual' THEN 'flat' ELSE COALESCE(cfg.cobro_tipo,'automatica') END)"
+    precio_expr = pricing.precio_sql(
+        carrier="base.carrier", zona="base.zona", kilo="base.kilos", fecha="base.fecha_envio",
+        seller="base.seller_id", metodo=metodo_expr, margen="cfg.cfg_margen")
     sql = f"""
     CREATE OR REPLACE TABLE reconciliacion AS
     WITH carrier AS (
@@ -71,7 +76,7 @@ def build(con) -> int:
     ),
     cat AS (
         SELECT base.*,
-            COALESCE(cfg.cobro_tipo, 'automatica') AS cobro_tipo,
+            {metodo_expr} AS cobro_tipo,
             cfg.dias_credito,
             CASE
                 WHEN NOT in_system THEN 'sin_sistema'
@@ -80,16 +85,11 @@ def build(con) -> int:
                 WHEN payment_model = '{config.CONFIG_PREPAGO}' THEN 'prepago'
                 ELSE 'otro'
             END AS tipo,
-            -- factor de cobro (1+margen): interno usa su pacto; resto, config del cliente o default
+            -- factor de cobro (1+margen) para EXTRAS: interno usa su pacto; resto, config o default
             CASE WHEN {internal} THEN {margin}
                  ELSE 1 + COALESCE(cfg.cfg_margen, {md}) END AS factor,
-            -- tarifa por zona/kilo (crédito manual), con el seller efectivo (incluye retornos)
-            (SELECT t.precio FROM tarifas t
-               WHERE t.seller_id = base.seller_id AND t.carrier = base.carrier AND t.zona = base.zona
-                 AND base.kilos >= COALESCE(t.peso_min, -1e12) AND base.kilos < COALESCE(t.peso_max, 1e12)
-                 AND (t.vigencia_desde IS NULL OR base.fecha_envio >= t.vigencia_desde)
-                 AND (t.vigencia_hasta IS NULL OR base.fecha_envio <= t.vigencia_hasta)
-               ORDER BY t.peso_min LIMIT 1) AS tarifa_precio
+            -- precio del cliente segun metodo (flat | margen global/zona/kilo) con fuel + IVA
+            {precio_expr} AS tarifa_precio
         FROM base LEFT JOIN cfg ON cfg.seller_id = base.seller_id
     ),
     val AS (
@@ -99,14 +99,14 @@ def build(con) -> int:
             -- crédito manual no usa extra: la tarifa por guía ya cubre re-pesos y retornos.
             CASE
                 WHEN NOT has_cost THEN 0
-                WHEN tipo = 'credito' AND cobro_tipo = 'manual' THEN 0
+                WHEN tipo = 'credito' AND cobro_tipo <> 'automatica' THEN 0
                 ELSE GREATEST(0, costo * factor - (COALESCE(sale_price,0) + sobrepeso_cobrado))
             END AS extra_raw,
             -- ingreso devengado (lo que se debe cobrar en total por la guía)
             CASE
                 WHEN NOT has_cost THEN COALESCE(sale_price,0) + sobrepeso_cobrado
                 WHEN tipo = 'interno' THEN costo * factor
-                WHEN tipo = 'credito' AND cobro_tipo = 'manual' THEN tarifa_precio
+                WHEN tipo = 'credito' AND cobro_tipo <> 'automatica' THEN tarifa_precio
                 WHEN tipo IN ('credito','prepago','otro') THEN GREATEST(COALESCE(sale_price,0) + sobrepeso_cobrado, costo * factor)
                 ELSE NULL
             END AS ingreso_raw
@@ -124,7 +124,7 @@ def build(con) -> int:
             WHEN NOT in_system THEN 'Sin guia en sistema'
             WHEN NOT has_cost  THEN 'Cobrado, costo pendiente'
             WHEN tipo = 'interno' THEN 'Interno (14%)'
-            WHEN tipo = 'credito' AND cobro_tipo = 'manual' AND tarifa_precio IS NULL THEN 'Falta cobrar (credito)'
+            WHEN tipo = 'credito' AND cobro_tipo <> 'automatica' AND tarifa_precio IS NULL THEN 'Falta cobrar (credito)'
             WHEN extra_raw > 0.5 THEN 'Extra por cobrar'
             ELSE 'Cobrado OK'
         END AS estatus,

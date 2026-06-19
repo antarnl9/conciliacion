@@ -13,7 +13,7 @@ from fastapi import FastAPI, UploadFile, File, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from .. import config, db, ch_sync, reconcile, export, supa
+from .. import config, db, ch_sync, reconcile, export, supa, pricing
 from ..parsers import PARSERS
 from . import jobs
 
@@ -489,6 +489,143 @@ def _i(v):
         return int(v) if v not in (None, "") else None
     except (TypeError, ValueError):
         return None
+
+
+_METODOS = {"automatica", "margen_global", "margen_zona", "margen_kilo", "flat"}
+
+
+# ---- Módulo Costos: rate card de la paquetería ----
+@app.get("/api/costos")
+def get_costos(carrier: str = "dhl"):
+    con = db.connect()
+    try:
+        return _rows(con, """SELECT zona, peso_min, peso_max, costo, vigencia_desde, vigencia_hasta
+                             FROM costos_tarifa WHERE carrier=? ORDER BY zona, peso_min""", [carrier])
+    finally:
+        con.close()
+
+
+@app.post("/api/costos")
+def save_costos(payload: dict):
+    """Reemplaza el rate card de una paquetería (vigencia global para toda la matriz)."""
+    carrier = payload.get("carrier", "dhl")
+    vd = payload.get("vigencia_desde") or None
+    vh = payload.get("vigencia_hasta") or None
+    rows = payload.get("rows", [])
+    con = db.connect()
+    try:
+        con.execute("DELETE FROM costos_tarifa WHERE carrier=?", [carrier])
+        for r in rows:
+            con.execute("INSERT INTO costos_tarifa VALUES (?,?,?,?,?,?,?)",
+                        [carrier, str(r.get("zona", "")).strip(), _f(r.get("peso_min")),
+                         _f(r.get("peso_max")), _f(r.get("costo")), vd, vh])
+        return {"ok": True, "filas": len(rows)}
+    finally:
+        con.close()
+
+
+# ---- Combustible (fuel) por periodo ----
+@app.get("/api/combustible")
+def get_combustible(carrier: str = "dhl"):
+    con = db.connect()
+    try:
+        return _rows(con, """SELECT vigencia_desde, vigencia_hasta, pct FROM combustible
+                             WHERE carrier=? ORDER BY vigencia_desde""", [carrier])
+    finally:
+        con.close()
+
+
+@app.post("/api/combustible")
+def save_combustible(payload: dict):
+    carrier = payload.get("carrier", "dhl")
+    rows = payload.get("rows", [])
+    con = db.connect()
+    try:
+        con.execute("DELETE FROM combustible WHERE carrier=?", [carrier])
+        for r in rows:
+            con.execute("INSERT INTO combustible VALUES (?,?,?,?)",
+                        [carrier, r.get("vigencia_desde") or None, r.get("vigencia_hasta") or None,
+                         _f(r.get("pct"))])
+        return {"ok": True, "filas": len(rows)}
+    finally:
+        con.close()
+
+
+# ---- Margen por zona / por kilo (métodos de cotización) ----
+@app.get("/api/margen-zona")
+def get_margen_zona(seller_id: int):
+    con = db.connect()
+    try:
+        return _rows(con, "SELECT zona, margen FROM margen_zona WHERE seller_id=? ORDER BY zona", [seller_id])
+    finally:
+        con.close()
+
+
+@app.post("/api/margen-zona")
+def save_margen_zona(payload: dict):
+    sid = int(payload["seller_id"]); rows = payload.get("rows", [])
+    con = db.connect()
+    try:
+        con.execute("DELETE FROM margen_zona WHERE seller_id=?", [sid])
+        for r in rows:
+            con.execute("INSERT INTO margen_zona VALUES (?,?,?)",
+                        [sid, str(r.get("zona", "")).strip(), _f(r.get("margen"))])
+        return {"ok": True, "filas": len(rows)}
+    finally:
+        con.close()
+
+
+@app.get("/api/margen-kilo")
+def get_margen_kilo(seller_id: int):
+    con = db.connect()
+    try:
+        return _rows(con, "SELECT peso_min, peso_max, margen FROM margen_kilo WHERE seller_id=? ORDER BY peso_min",
+                     [seller_id])
+    finally:
+        con.close()
+
+
+@app.post("/api/margen-kilo")
+def save_margen_kilo(payload: dict):
+    sid = int(payload["seller_id"]); rows = payload.get("rows", [])
+    con = db.connect()
+    try:
+        con.execute("DELETE FROM margen_kilo WHERE seller_id=?", [sid])
+        for r in rows:
+            con.execute("INSERT INTO margen_kilo VALUES (?,?,?)",
+                        [sid, _f(r.get("peso_min")), _f(r.get("peso_max")), _f(r.get("margen"))])
+        return {"ok": True, "filas": len(rows)}
+    finally:
+        con.close()
+
+
+# ---- Preview: tarifa resultante del cliente (costo × fuel × margen × IVA) ----
+@app.get("/api/tarifa-preview")
+def tarifa_preview(seller_id: int, carrier: str = "dhl"):
+    con = db.connect()
+    try:
+        cfg = con.execute("SELECT metodo, margen FROM config_credito WHERE seller_id=?", [seller_id]).fetchone()
+        metodo = (cfg[0] if cfg and cfg[0] else "automatica")
+        if metodo not in _METODOS or metodo == "automatica":
+            return {"metodo": metodo, "iva": config.IVA_DEFAULT, "rows": []}
+        margen = cfg[1] if cfg else None
+        expr = pricing.precio_sql(
+            carrier="ct.carrier", zona="ct.zona", kilo="COALESCE(ct.peso_min,0)",
+            fecha="current_date", seller=str(int(seller_id)),
+            metodo="'" + metodo + "'", margen=("NULL" if margen is None else str(float(margen))))
+        fuel = ("COALESCE((SELECT cb.pct FROM combustible cb WHERE cb.carrier=ct.carrier AND current_date "
+                "BETWEEN COALESCE(cb.vigencia_desde,DATE '1900-01-01') AND COALESCE(cb.vigencia_hasta,DATE '2999-01-01') "
+                "ORDER BY cb.vigencia_desde DESC LIMIT 1),0)")
+        rows = _rows(con, f"""
+            SELECT ct.zona, ct.peso_min, ct.peso_max, ct.costo,
+                   round({fuel},4) AS fuel, round({expr},2) AS precio
+            FROM costos_tarifa ct
+            WHERE ct.carrier=? AND current_date BETWEEN COALESCE(ct.vigencia_desde,DATE '1900-01-01')
+                  AND COALESCE(ct.vigencia_hasta,DATE '2999-01-01')
+            ORDER BY ct.zona, ct.peso_min""", [carrier])
+        return {"metodo": metodo, "iva": config.IVA_DEFAULT, "rows": rows}
+    finally:
+        con.close()
 
 
 @app.post("/api/cobro/generar")
