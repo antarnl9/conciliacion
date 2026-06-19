@@ -18,17 +18,21 @@ _D1 = "DATE '2999-01-01'"
 
 
 def precio_sql(*, carrier: str, zona: str, kilo: str, fecha: str,
-               seller: str, metodo: str, margen: str, iva: float | None = None) -> str:
+               seller: str, metodo: str, margen: str, servicio: str = "''", iva: float | None = None) -> str:
     """Devuelve una expresión SQL que evalúa el precio del cliente.
-    Cada argumento (salvo iva) es una expresión SQL: una columna (ej. 'base.zona') o literal."""
+    Cada argumento (salvo iva) es una expresión SQL: una columna (ej. 'base.zona') o literal.
+    `servicio` = servicio de la guía (producto); el costo se busca por servicio, con fallback general."""
     iva = config.IVA_DEFAULT if iva is None else iva
+    svc = f"COALESCE({servicio},'')"
 
     def vig(a, b):
         return f"({fecha} BETWEEN COALESCE({a},{_D0}) AND COALESCE({b},{_D1}))"
 
     base = (f"(SELECT ct.costo FROM costos_tarifa ct WHERE ct.carrier={carrier} AND ct.zona={zona} "
             f"AND {kilo} >= COALESCE(ct.peso_min,-1e12) AND {kilo} < COALESCE(ct.peso_max,1e12) "
-            f"AND {vig('ct.vigencia_desde','ct.vigencia_hasta')} ORDER BY ct.peso_min LIMIT 1)")
+            f"AND {vig('ct.vigencia_desde','ct.vigencia_hasta')} "
+            f"AND (COALESCE(ct.servicio,'')='' OR COALESCE(ct.servicio,'')={svc}) "
+            f"ORDER BY (COALESCE(ct.servicio,'')={svc}) DESC, ct.peso_min LIMIT 1)")
     fuel = (f"COALESCE((SELECT cb.pct FROM combustible cb WHERE cb.carrier={carrier} "
             f"AND {vig('cb.vigencia_desde','cb.vigencia_hasta')} ORDER BY cb.vigencia_desde DESC LIMIT 1),0)")
     mz = (f"COALESCE((SELECT mz.margen FROM margen_zona mz WHERE mz.seller_id={seller} AND mz.zona={zona} LIMIT 1),0)")

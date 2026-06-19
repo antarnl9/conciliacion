@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS tarifas (
     vigencia_hasta DATE
 );
 
--- COSTOS: rate card de la paqueteria (zona x rango de kilo -> costo). Vigencia GLOBAL por version.
+-- COSTOS: rate card de la paqueteria (servicio x zona x rango de kilo -> costo). Vigencia GLOBAL.
+-- servicio = el tipo de servicio de la paqueteria (ej. 'Express Saver', 'Standard', 'G'); vacio = tarifa general.
 CREATE TABLE IF NOT EXISTS costos_tarifa (
     carrier        VARCHAR,
     zona           VARCHAR,
@@ -92,7 +93,8 @@ CREATE TABLE IF NOT EXISTS costos_tarifa (
     peso_max       DOUBLE,
     costo          DOUBLE,
     vigencia_desde DATE,
-    vigencia_hasta DATE
+    vigencia_hasta DATE,
+    servicio       VARCHAR
 );
 
 -- Combustible (fuel) por paqueteria y periodo (semanal o mensual = rango de fechas). pct ej 0.16.

@@ -500,8 +500,8 @@ _METODOS = {"automatica", "margen_global", "margen_zona", "margen_kilo", "flat"}
 def get_costos(carrier: str = "dhl"):
     con = db.connect()
     try:
-        return _rows(con, """SELECT zona, peso_min, peso_max, costo, vigencia_desde, vigencia_hasta
-                             FROM costos_tarifa WHERE carrier=? ORDER BY zona, peso_min""", [carrier])
+        return _rows(con, """SELECT servicio, zona, peso_min, peso_max, costo, vigencia_desde, vigencia_hasta
+                             FROM costos_tarifa WHERE carrier=? ORDER BY servicio, zona, peso_min""", [carrier])
     finally:
         con.close()
 
@@ -517,9 +517,11 @@ def save_costos(payload: dict):
     try:
         con.execute("DELETE FROM costos_tarifa WHERE carrier=?", [carrier])
         for r in rows:
-            con.execute("INSERT INTO costos_tarifa VALUES (?,?,?,?,?,?,?)",
-                        [carrier, str(r.get("zona", "")).strip(), _f(r.get("peso_min")),
-                         _f(r.get("peso_max")), _f(r.get("costo")), vd, vh])
+            con.execute("""INSERT INTO costos_tarifa
+                (carrier, servicio, zona, peso_min, peso_max, costo, vigencia_desde, vigencia_hasta)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                [carrier, (str(r.get("servicio", "")).strip() or None), str(r.get("zona", "")).strip(),
+                 _f(r.get("peso_min")), _f(r.get("peso_max")), _f(r.get("costo")), vd, vh])
         return {"ok": True, "filas": len(rows)}
     finally:
         con.close()
@@ -621,18 +623,18 @@ def tarifa_preview(seller_id: int, carrier: str = "dhl"):
         # OJO: alias externo 'cc' (distinto de 'ct' que usa el motor internamente, si no se rompe la correlación)
         expr = pricing.precio_sql(
             carrier="cc.carrier", zona="cc.zona", kilo="COALESCE(cc.peso_min,0)",
-            fecha="current_date", seller=str(int(seller_id)),
+            fecha="current_date", seller=str(int(seller_id)), servicio="cc.servicio",
             metodo="'" + metodo + "'", margen=("NULL" if margen is None else str(float(margen))))
         fuel = ("COALESCE((SELECT cb.pct FROM combustible cb WHERE cb.carrier=cc.carrier AND current_date "
                 "BETWEEN COALESCE(cb.vigencia_desde,DATE '1900-01-01') AND COALESCE(cb.vigencia_hasta,DATE '2999-01-01') "
                 "ORDER BY cb.vigencia_desde DESC LIMIT 1),0)")
         rows = _rows(con, f"""
-            SELECT cc.zona, cc.peso_min, cc.peso_max, cc.costo,
+            SELECT cc.servicio, cc.zona, cc.peso_min, cc.peso_max, cc.costo,
                    round({fuel},4) AS fuel, round({expr},2) AS precio
             FROM costos_tarifa cc
             WHERE cc.carrier=? AND current_date BETWEEN COALESCE(cc.vigencia_desde,DATE '1900-01-01')
                   AND COALESCE(cc.vigencia_hasta,DATE '2999-01-01')
-            ORDER BY cc.zona, cc.peso_min""", [carrier])
+            ORDER BY cc.servicio, cc.zona, cc.peso_min""", [carrier])
         return {"metodo": metodo, "iva": config.IVA_DEFAULT, "rows": rows}
     finally:
         con.close()

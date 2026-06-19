@@ -36,7 +36,7 @@ def build(con) -> int:
     metodo_expr = "(CASE WHEN cfg.cobro_tipo='manual' THEN 'flat' ELSE COALESCE(cfg.cobro_tipo,'automatica') END)"
     precio_expr = pricing.precio_sql(
         carrier="base.carrier", zona="base.zona", kilo="base.kilos", fecha="base.fecha_envio",
-        seller="base.seller_id", metodo=metodo_expr, margen="cfg.cfg_margen")
+        seller="base.seller_id", metodo=metodo_expr, margen="cfg.cfg_margen", servicio="base.producto")
     sql = f"""
     CREATE OR REPLACE TABLE reconciliacion AS
     WITH carrier AS (
@@ -59,7 +59,7 @@ def build(con) -> int:
             c.importe_neto AS costo,
             (c.guia IS NOT NULL) AS has_cost,
             COALESCE(c.es_retorno, false) AS es_retorno,
-            c.zona, c.kilos,
+            c.zona, c.kilos, c.producto,
             COALESCE(c.fecha_envio, CAST(s.created_at AS DATE)) AS fecha_envio,
             c.fecha_factura, c.remitente,
             COALESCE(s.seller_id,   CASE WHEN COALESCE(c.es_retorno,false) THEN rs.seller_id END)     AS seller_id,

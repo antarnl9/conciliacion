@@ -49,6 +49,7 @@ def connect() -> duckdb.DuckDBPyConnection:
         "ALTER TABLE cobros ADD COLUMN IF NOT EXISTS fecha_vencimiento DATE",
         # reconcile.build() la reemplaza completa; esto evita crash si se consulta antes de re-conciliar
         "ALTER TABLE reconciliacion ADD COLUMN IF NOT EXISTS extra DOUBLE",
+        "ALTER TABLE costos_tarifa ADD COLUMN IF NOT EXISTS servicio VARCHAR",
     ):
         con.execute(ddl)
     return con
