@@ -103,6 +103,15 @@
   .pstep.err{color:var(--red-700)} .pstep.err .pic{background:var(--red-700);border-color:var(--red-700);color:#fff}
   .pstep .pex{margin-left:auto;font-size:11.5px;color:var(--gray-600);font-weight:400;text-align:right}
   @keyframes spin{to{transform:rotate(360deg)}}
+  .kebab{background:#fff;border:1px solid var(--gray-200);border-radius:7px;width:30px;height:30px;cursor:pointer;font-size:16px;color:var(--gray-700);line-height:1;padding:0;flex-shrink:0}
+  .kebab:hover{background:var(--blue-100)}
+  .dropmenu{position:fixed;background:#fff;border:1px solid var(--gray-200);border-radius:9px;box-shadow:0 10px 30px rgba(0,0,0,.12);min-width:186px;z-index:1200;overflow:hidden;display:none}
+  .dropmenu.show{display:block}
+  .dropmenu a,.dropmenu label{display:block;padding:10px 15px;font-size:13px;color:var(--oxford);cursor:pointer;white-space:nowrap;text-decoration:none}
+  .dropmenu a:hover,.dropmenu label:hover{background:var(--blue-100)}
+  .dkpi{display:flex;gap:22px;flex-wrap:wrap;background:var(--blue-100);border:1px solid var(--gray-200);border-radius:9px;padding:13px 16px;margin-bottom:16px}
+  .dkpi .b{font-size:11px;color:var(--gray-600);text-transform:uppercase;letter-spacing:.03em}
+  .dkpi .v{font-size:16px;font-weight:700;color:var(--heading,#1F2937)}
   .login-ov{position:fixed;inset:0;background:#f3f5f8;display:none;align-items:center;justify-content:center;z-index:1000}
   .login-ov.show{display:flex}
   .login-card{background:#fff;border:1px solid var(--gray-200);border-radius:14px;padding:34px 30px;width:340px;box-shadow:0 12px 44px rgba(0,0,0,.10)}
@@ -154,6 +163,15 @@
     <div class="modal-foot" id="cm-foot"></div>
   </div>
 </div>
+
+<div class="modal-overlay" id="modal2">
+  <div class="modal" style="max-width:760px">
+    <div class="modal-head"><h3 id="m2-title">Detalle de cobro</h3><button class="x" onclick="closeModal2()">✕</button></div>
+    <div class="modal-body" id="m2-body"></div>
+  </div>
+</div>
+
+<div class="dropmenu" id="rowmenu"></div>
 
 <script>
 let TOKEN=null, SB=null, AUTH=false;
@@ -242,26 +260,21 @@ const views = {
     const venc = rows.filter(r=>r.dias_atraso>0).length;
     const ESTB={generado:'b-gray',enviado:'b-blue',parcial:'b-yellow',pagado:'b-green'};
     $('#view').innerHTML = toolbar('Cobranza',
-        `${COBMES} · por cobrar $${fmt(tot)} · pagado $${fmt(pagado)} · saldo $${fmt(tot-pagado)} · ${venc} vencidos`,
-        `<button class="btn-primary" onclick="generarCobro()">Generar cobro del mes</button>`) +
-      `<div class="filters"><span class="muted">Mes:</span><select id="cob-mes" onchange="cobMes()">${opts}</select></div>` +
-      (rows.length ? tbl(['Cliente','Tipo','Guías','Monto','Pagado','Saldo','Vence','Estatus','Acciones'], rows, r=>{
+        `${COBMES} · por cobrar $${fmt(tot)} · pagado $${fmt(pagado)} · saldo $${fmt(tot-pagado)} · ${venc} vencidos`, '') +
+      `<div class="filters"><span class="muted">Mes:</span><select id="cob-mes" onchange="cobMes()">${opts}</select>
+         <button class="btn-secondary btn-sm" style="margin-left:auto" onclick="generarCobro()" title="Recalcula el cobro del mes desde la conciliación. Úsalo si cambiaste un margen o una tarifa (conserva pagos registrados).">↻ Regenerar</button></div>` +
+      (rows.length ? tbl(['Cliente','Tipo','Guías','Monto','Pagado','Saldo','Vence','Estatus',''], rows, r=>{
         const vence=r.fecha_vencimiento ? `${r.fecha_vencimiento}${r.dias_atraso>0?` <span style="color:var(--red-700);font-weight:600">+${r.dias_atraso}d</span>`:''}` : '—';
-        const acc=[];
-        if(r.estatus==='generado') acc.push(`<button class="btn-secondary btn-sm" onclick="enviarFactura(${r.seller_id})">Enviar</button>`);
-        if(r.estatus!=='pagado') acc.push(`<button class="btn-secondary btn-sm" onclick="registrarPago(${r.seller_id},${r.saldo})">Pago</button>`);
-        acc.push(`<a class="btn-secondary btn-sm" style="text-decoration:none" href="${dl(`/api/cobro/seller?seller_id=${r.seller_id}&mes=${COBMES}`)}">Excel</a>`);
-        acc.push(r.tiene_pdf
-          ? `<a class="btn-secondary btn-sm" style="text-decoration:none;color:var(--green-700)" href="${dl(`/api/cobro/pdf?seller_id=${r.seller_id}&mes=${COBMES}`)}" target="_blank">PDF ✓</a>`
-          : `<label class="file"><span class="btn-secondary btn-sm">PDF</span><input type="file" accept=".pdf" onchange="subirPdf(${r.seller_id},this)"></label>`);
         return `<tr><td><b>${r.cliente||'—'}</b></td>
           <td><span class="badge ${r.tipo==='credito'?'b-blue':'b-gray'}">${r.tipo}${r.concepto==='extra'?' · extra':''}</span></td>
           <td>${fmt(r.guias)}</td><td><b>${money(r.monto)}</b></td><td>${money(r.pagado)}</td>
           <td class="${r.saldo>0.5?'neg':'pos'}"><b>${money(r.saldo)}</b></td>
           <td style="font-size:12px;white-space:nowrap">${vence}</td>
           <td><span class="badge ${ESTB[r.estatus]||'b-gray'}">${r.estatus}</span></td>
-          <td><div style="display:flex;gap:4px;flex-wrap:wrap">${acc.join('')}</div></td></tr>`;})
-      : `<div class="card"><div class="empty"><h3>Sin cobro generado para ${COBMES}</h3><p>Da clic en "Generar cobro del mes" para crear el cobro por cliente desde la conciliación.</p></div></div>`);
+          <td><div style="display:flex;gap:7px;align-items:center;justify-content:flex-end">
+            <button class="btn-secondary btn-sm" onclick="verCobroDetalle(${r.seller_id})">Ver detalle</button>
+            <button class="kebab" onclick="openRowMenu(${r.seller_id},${r.saldo},'${r.estatus}',${r.tiene_pdf?1:0},event)">⋮</button></div></td></tr>`;})
+      : `<div class="card"><div class="empty"><h3>Sin cobro generado para ${COBMES}</h3><p>El cobro se genera solo al cerrar el mes. Si ya cerraste y no aparece, usa "↻ Regenerar".</p></div></div>`);
   },
   rep_prepago: null, // placeholders set below
 };
@@ -444,18 +457,20 @@ window.reabrirMes=async function(mes){ if(!confirm('¿Reabrir '+mes+'? Volverá 
 // ---- cobranza ----
 window.cobMes=function(){ window.COBMES=$('#cob-mes').value; views.cobranza(); };
 window.generarCobro=async function(){
-  if(!confirm('¿Generar el cobro de '+COBMES+'? Crea el monto a cobrar por cliente desde la conciliación.'))return;
+  if(!confirm('¿Regenerar el cobro de '+COBMES+'? Recalcula desde la conciliación (conserva los pagos ya registrados).'))return;
   const r=await jpost('/api/cobro/generar?mes='+COBMES);
-  alert(`Cobro generado para ${COBMES}: ${r.sellers} clientes · $${fmt(r.monto_total)}`); views.cobranza();
+  $('#job').innerHTML=`<span class="dot ok"></span>cobro ${COBMES}: ${r.sellers} clientes · $${fmt(r.monto_total)}`; views.cobranza();
 };
 window.setCobEst=async function(sid,est){ await jpost('/api/cobro/estatus',{seller_id:sid,mes:COBMES,estatus:est}); views.cobranza(); };
 window.enviarFactura=async function(sid){
+  $('#rowmenu').classList.remove('show');
   if(!confirm('¿Marcar la factura como enviada hoy? El vencimiento se calcula con los días de crédito del cliente.'))return;
   const r=await jpost('/api/cobro/enviar',{seller_id:sid,mes:COBMES});
   if(r.vencimiento)$('#job').innerHTML=`<span class="dot ok"></span>enviada · vence ${r.vencimiento}`;
   views.cobranza();
 };
 window.registrarPago=async function(sid,saldo){
+  $('#rowmenu').classList.remove('show');
   const m=prompt('Monto del pago (saldo $'+fmt(saldo)+'):', Math.round(saldo*100)/100);
   if(m===null||m==='')return;
   const monto=Number(m); if(!(monto>0)){alert('Monto inválido');return;}
@@ -464,6 +479,47 @@ window.registrarPago=async function(sid,saldo){
   const r=await jpost('/api/cobro/pago',{seller_id:sid,mes:COBMES,monto,fecha:f||undefined});
   $('#job').innerHTML=`<span class="dot ok"></span>pago $${fmt(r.pagado)} · saldo $${fmt(r.saldo)}`;
   views.cobranza();
+};
+// menú de 3 puntitos (compartido, posición fija para no recortarse en la tabla)
+window.openRowMenu=function(sid,saldo,estatus,tienePdf,ev){
+  ev.stopPropagation();
+  const m=$('#rowmenu');
+  m.innerHTML=[
+    estatus==='generado'?`<a onclick="enviarFactura(${sid})">Enviar factura</a>`:'',
+    estatus!=='pagado'?`<a onclick="registrarPago(${sid},${saldo})">Registrar pago</a>`:'',
+    `<a href="${dl(`/api/cobro/seller?seller_id=${sid}&mes=${COBMES}`)}">Descargar Excel</a>`,
+    tienePdf?`<a href="${dl(`/api/cobro/pdf?seller_id=${sid}&mes=${COBMES}`)}" target="_blank">Ver factura ✓</a>`
+            :`<label>Adjuntar factura<input type="file" accept=".pdf" style="display:none" onchange="subirPdf(${sid},this)"></label>`
+  ].join('');
+  const b=ev.currentTarget.getBoundingClientRect();
+  m.style.top=(b.bottom+5)+'px'; m.style.left=Math.max(8,b.right-188)+'px';
+  m.classList.add('show');
+};
+document.addEventListener('click',e=>{ if(!e.target.closest('.kebab')) $('#rowmenu').classList.remove('show'); });
+window.closeModal2=()=>$('#modal2').classList.remove('show');
+window.verCobroDetalle=async function(sid){
+  $('#rowmenu').classList.remove('show');
+  const d=await jget(`/api/cobro/detalle?seller_id=${sid}&mes=${COBMES}`);
+  if(d.error){alert('Sin cobro para este cliente en '+COBMES);return;}
+  $('#m2-title').textContent=`${d.cliente} · ${COBMES}`;
+  $('#m2-body').innerHTML=`
+    <div class="dkpi">
+      <div><div class="b">Tipo</div><div class="v" style="font-size:14px">${d.tipo}${d.concepto==='extra'?' · extra':''}</div></div>
+      <div><div class="b">Monto</div><div class="v">${money(d.monto)}</div></div>
+      <div><div class="b">Pagado</div><div class="v">${money(d.pagado)}</div></div>
+      <div><div class="b">Saldo</div><div class="v ${d.saldo>0.5?'neg':'pos'}">${money(d.saldo)}</div></div>
+      <div><div class="b">Estatus</div><div class="v" style="font-size:14px">${d.estatus}</div></div>
+      ${d.fecha_vencimiento?`<div><div class="b">Vence</div><div class="v" style="font-size:14px">${d.fecha_vencimiento}</div></div>`:''}
+    </div>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">${d.concepto==='extra'
+      ? 'Cobro de <b>extras</b> (sobrepeso, retornos o desfase de costo): solo las guías con cargo adicional.'
+      : 'Factura completa del periodo: todas las guías cobradas al cliente.'} ${d.guias.length>=500?'· (mostrando las primeras 500 por importe)':''}</div>
+    <div class="tblwrap" style="max-height:48vh;overflow:auto">
+      <table><thead><tr><th>Guía</th><th>Fecha</th><th>Producto</th><th>Destino</th><th>Kilos</th><th>Zona</th><th>Importe</th></tr></thead>
+      <tbody>${d.guias.map(g=>`<tr><td>${g.guia||'—'}${g.es_retorno?' ↩︎':''}</td><td>${g.fecha||'—'}</td><td>${g.producto||'—'}</td>
+        <td>${g.destino||'—'}</td><td>${fmt(g.kilos)}</td><td>${g.zona||'—'}</td><td><b>${money(g.importe)}</b></td></tr>`).join('')}</tbody></table>
+    </div>`;
+  $('#modal2').classList.add('show');
 };
 window.subirPdf=async function(sid,input){
   const f=input.files[0]; if(!f)return;

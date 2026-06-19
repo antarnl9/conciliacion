@@ -612,6 +612,35 @@ def cobro_estatus(payload: dict):
         con.close()
 
 
+@app.get("/api/cobro/detalle")
+def cobro_detalle(seller_id: int, mes: str):
+    """Detalle del cobro de un cliente/mes: resumen + guías cobradas (para 'Ver detalle')."""
+    con = db.connect()
+    try:
+        c = con.execute("""SELECT cliente, tipo, concepto, monto, estatus, fecha_enviada, fecha_vencimiento
+                           FROM cobros WHERE seller_id=? AND mes=?""", [seller_id, mes]).fetchone()
+        if not c:
+            return JSONResponse({"error": "sin cobro"}, 404)
+        pagado = con.execute("SELECT COALESCE(round(sum(monto),2),0) FROM pagos WHERE seller_id=? AND mes=?",
+                             [seller_id, mes]).fetchone()[0]
+        es_extra = c[2] == "extra"
+        imp = "r.extra" if es_extra else "r.ingreso"
+        filtro = "AND r.extra > 0.5" if es_extra else ""
+        guias = _rows(con, f"""
+            WITH carrier AS (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY guia ORDER BY fecha_factura NULLS LAST) rn
+                             FROM facturas_carrier) WHERE rn=1)
+            SELECT fc.guia, CAST(fc.fecha_envio AS VARCHAR) fecha, fc.producto, fc.destino, fc.kilos, fc.zona,
+                   r.es_retorno, round({imp},2) importe
+            FROM reconciliacion r JOIN carrier fc ON fc.guia = r.guia
+            WHERE r.seller_id=? AND r.mes_envio=? {filtro} ORDER BY importe DESC LIMIT 500""", [seller_id, mes])
+        return {"cliente": c[0], "tipo": c[1], "concepto": c[2], "monto": c[3], "estatus": c[4],
+                "fecha_enviada": str(c[5]) if c[5] else None,
+                "fecha_vencimiento": str(c[6]) if c[6] else None,
+                "pagado": pagado, "saldo": round((c[3] or 0) - pagado, 2), "guias": guias}
+    finally:
+        con.close()
+
+
 @app.get("/api/cobro/seller")
 def cobro_seller(seller_id: int, mes: str):
     """Descarga el cobro de un cliente: detalle estilo Acre (paquetería) + cobro + margen."""
