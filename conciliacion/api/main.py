@@ -89,8 +89,9 @@ def status():
                        -- ingreso/utilidad REALIZADOS = solo guías que ya tienen costo de paquetería
                        round(sum(CASE WHEN costo IS NOT NULL THEN ingreso ELSE 0 END),2) ingreso,
                        round(sum(CASE WHEN costo IS NOT NULL AND ingreso IS NOT NULL THEN ingreso - costo ELSE 0 END),2) margen,
-                       round(sum(CASE WHEN estatus IN ('Falta cobrar (credito)','Sobrepeso pendiente')
-                              THEN costo - coalesce(ingreso,0) ELSE 0 END),2) por_cobrar,
+                       round(sum(CASE WHEN estatus='Extra por cobrar' THEN coalesce(extra,0)
+                                      WHEN estatus='Falta cobrar (credito)' THEN costo - coalesce(ingreso,0)
+                                      ELSE 0 END),2) por_cobrar,
                        -- cobrado pero la paquetería aún no factura el costo (devengado)
                        round(sum(CASE WHEN costo IS NULL THEN coalesce(ingreso,0) ELSE 0 END),2) por_devengar
                 FROM reconciliacion""").fetchone()
@@ -184,6 +185,7 @@ def clientes_prepago(limit: int = 500, desde: str = "", hasta: str = ""):
                    round(sum(r.ingreso),2) ingreso,
                    round(sum(r.ingreso)-sum(r.costo),2) margen,
                    round(100*(sum(r.ingreso)-sum(r.costo))/nullif(sum(r.costo),0),1) margen_pct,
+                   round(sum(coalesce(r.extra,0)),2) extra,
                    round(sum(r.sobrepeso_cobrado),2) sobrepeso,
                    round(sum(CASE WHEN r.es_retorno THEN r.costo ELSE 0 END),2) retornos,
                    count(*) FILTER (WHERE r.es_retorno) guias_retorno,
@@ -208,6 +210,7 @@ def clientes_credito(limit: int = 500, desde: str = "", hasta: str = ""):
                    round(sum(costo),2) costo,
                    round(sum(coalesce(ingreso,0)),2) facturado,
                    round(sum(CASE WHEN ingreso IS NULL THEN costo ELSE 0 END),2) falta_cobrar,
+                   round(sum(coalesce(recargos,0)),2) recargos,
                    round(sum(sobrepeso_cobrado),2) sobrepeso,
                    round(sum(CASE WHEN es_retorno THEN costo ELSE 0 END),2) retornos,
                    count(*) FILTER (WHERE es_retorno) guias_retorno
@@ -238,8 +241,9 @@ def guias(limit: int = 100, offset: int = 0, tipo: str = "", estatus: str = "",
     try:
         total = con.execute(f"SELECT count(*) FROM reconciliacion {wsql}", params).fetchone()[0]
         rows = _rows(con, f"""
-            SELECT guia, cliente_real, tipo, estatus, es_retorno,
+            SELECT guia, carrier, cliente_real, tipo, estatus, es_retorno,
                    round(costo,2) costo, sale_price, round(sobrepeso_cobrado,2) sobrepeso,
+                   round(coalesce(extra,0),2) extra, round(coalesce(recargos,0),2) recargos,
                    round(ingreso,2) ingreso, round(margen,2) margen, mes_envio
             FROM reconciliacion {wsql}
             ORDER BY costo DESC LIMIT ? OFFSET ?""", params + [limit, offset])
@@ -257,9 +261,10 @@ def por_cobrar(limit: int = 200, desde: str = "", hasta: str = ""):
         return _rows(con, f"""
             SELECT cliente_real, estatus, count(*) guias,
                    round(sum(costo),2) costo,
-                   round(sum(costo)-sum(coalesce(ingreso,0)),2) falta_cobrar
+                   round(sum(CASE WHEN estatus='Extra por cobrar' THEN coalesce(extra,0)
+                                  ELSE costo - coalesce(ingreso,0) END),2) falta_cobrar
             FROM reconciliacion
-            WHERE estatus IN ('Falta cobrar (credito)','Sobrepeso pendiente','Cobrado bajo costo'){extra}
+            WHERE estatus IN ('Falta cobrar (credito)','Extra por cobrar'){extra}
             GROUP BY cliente_real, estatus ORDER BY falta_cobrar DESC LIMIT ?""", fp + [limit])
     finally:
         con.close()
@@ -274,8 +279,9 @@ def cierre_meses():
                    round(sum(costo),2) costo,
                    round(sum(CASE WHEN costo IS NOT NULL THEN ingreso ELSE 0 END),2) ingreso,
                    round(sum(CASE WHEN costo IS NOT NULL AND ingreso IS NOT NULL THEN ingreso - costo ELSE 0 END),2) utilidad,
-                   round(sum(CASE WHEN estatus IN ('Falta cobrar (credito)','Sobrepeso pendiente')
-                          THEN costo - coalesce(ingreso,0) ELSE 0 END),2) por_cobrar,
+                   round(sum(CASE WHEN estatus='Extra por cobrar' THEN coalesce(extra,0)
+                                  WHEN estatus='Falta cobrar (credito)' THEN costo - coalesce(ingreso,0)
+                                  ELSE 0 END),2) por_cobrar,
                    round(sum(CASE WHEN costo IS NULL THEN coalesce(ingreso,0) ELSE 0 END),2) por_devengar
             FROM reconciliacion WHERE mes_envio IS NOT NULL AND mes_envio <> 'SIN'
             GROUP BY mes_envio ORDER BY mes_envio DESC""")

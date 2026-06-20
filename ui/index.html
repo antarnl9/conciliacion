@@ -578,17 +578,18 @@ window.limpiarFechas=()=>{ window.FDESDE=''; window.FHASTA=''; (ROUTER[VIEW]||RO
 async function repPrepago(){
   const rows = await jget('/api/clientes/prepago?limit=600&'+dateQS());
   $('#view').innerHTML = toolbar('Reportes · Prepago', `${rows.length} clientes prepago`) + dateBar() +
-    tbl(['Cliente','Guías','Costo','Ingreso','Margen','%','Sobrepeso','Retornos','Recargas'], rows, r=>
+    tbl(['Cliente','Guías','Costo','Ingreso','Margen','%','Extra x cobrar','Sobrepeso','Retornos','Recargas'], rows, r=>
       `<tr><td>${r.cliente_real||'—'}</td><td>${fmt(r.guias)}</td><td>${money(r.costo)}</td><td>${money(r.ingreso)}</td>
        <td class="${cls(r.margen)}">${money(r.margen)}</td><td class="${cls(r.margen)}">${r.margen_pct==null?'—':r.margen_pct+'%'}</td>
+       <td class="${r.extra>0.5?'neg':''}">${money(r.extra)}</td>
        <td>${money(r.sobrepeso)}</td><td>${money(r.retornos)}</td><td>${money(r.recargas)}</td></tr>`);
 }
 async function repCredito(){
   const rows = await jget('/api/clientes/credito?limit=600&'+dateQS());
   $('#view').innerHTML = toolbar('Reportes · Crédito', `${rows.length} clientes crédito`) + dateBar() +
-    tbl(['Cliente','Guías','Costo','Facturado','Falta cobrar','Sobrepeso','Retornos'], rows, r=>
+    tbl(['Cliente','Guías','Costo','Facturado','Recargos','Falta cobrar','Sobrepeso','Retornos'], rows, r=>
       `<tr><td>${r.cliente_real||'—'}</td><td>${fmt(r.guias)}</td><td>${money(r.costo)}</td><td>${money(r.facturado)}</td>
-       <td class="neg">${money(r.falta_cobrar)}</td><td>${money(r.sobrepeso)}</td><td>${money(r.retornos)}</td></tr>`);
+       <td>${money(r.recargos)}</td><td class="neg">${money(r.falta_cobrar)}</td><td>${money(r.sobrepeso)}</td><td>${money(r.retornos)}</td></tr>`);
 }
 async function repCobrar(){
   const rows = await jget('/api/por-cobrar?limit=400&'+dateQS());
@@ -607,13 +608,14 @@ async function repGuias(offset=0){
     `<div class="filters">
       <input id="g-q" placeholder="buscar guía…" value="${vof('g-q')}">
       <input id="g-cliente" placeholder="cliente…" value="${vof('g-cliente')}">
-      <select id="g-tipo">${opt('g-tipo',['','prepago','credito','interno','sin_sistema'],['(tipo)','prepago','crédito','interno','sin sistema'])}</select>
-      <select id="g-estatus">${opt('g-estatus',['','Cobrado OK','Sobrepeso pendiente','Falta cobrar (credito)','Cobrado bajo costo','Interno (14%)','Sin guia en sistema'],['(estatus)'])}</select>
+      <select id="g-tipo">${opt('g-tipo',['','prepago','credito','interno','otro','sin_sistema'],['(tipo)','prepago','crédito','interno','otro','sin sistema'])}</select>
+      <select id="g-estatus">${opt('g-estatus',['','Cobrado OK','Extra por cobrar','Falta cobrar (credito)','Cobrado, costo pendiente','Interno (14%)','Sin guia en sistema'],['(estatus)'])}</select>
       <button class="btn-secondary btn-sm" onclick="repGuias(0)">Filtrar</button>
     </div>` +
-    tbl(['Guía','Cliente','Tipo','Estatus','Ret','Costo','Precio','Sobrepeso','Ingreso','Margen','Mes'], d.rows, r=>
-      `<tr><td>${r.guia}</td><td>${r.cliente_real||'—'}</td><td>${r.tipo}</td><td>${badge(r.estatus)}</td>
+    tbl(['Guía','Paq.','Cliente','Tipo','Estatus','Ret','Costo','Precio','Sobrepeso','Extra','Recargo','Ingreso','Margen','Mes'], d.rows, r=>
+      `<tr><td>${r.guia}</td><td>${carLbl(r.carrier)}</td><td>${r.cliente_real||'—'}</td><td>${r.tipo}</td><td>${badge(r.estatus)}</td>
        <td>${r.es_retorno?'↩︎':''}</td><td>${money(r.costo)}</td><td>${money(r.sale_price)}</td><td>${money(r.sobrepeso)}</td>
+       <td>${money(r.extra)}</td><td>${money(r.recargos)}</td>
        <td>${money(r.ingreso)}</td><td class="${cls(r.margen)}">${money(r.margen)}</td><td>${r.mes_envio||''}</td></tr>`,
       `<div class="pager"><span class="muted">En total ${fmt(d.total)} registro(s)</span>
         <div style="display:flex;gap:8px;align-items:center">
