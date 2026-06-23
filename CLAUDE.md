@@ -71,8 +71,57 @@ Config por cliente de crédito (vista Configuración de tarifas): `metodo` (auto
 
 ## 5. ClickHouse (fuente)
 
-- Conexión: creds en `../data-platform/.env.local` (password bueno de PROD está en `../data-platform/cube/.env` si `.env.local` da 401). Host PROD `b9yqryvtor...`, DB `t1_envios`.
-- Tablas: `fct_shipments` (shipment_number, seller_name, seller_configuration_name, sale_price, carrier_name, created_at), `fct_wallet_transactions` (transaction_type_name='Cargo por sobrepeso', reference, amount).
+### Cluster nuevo — mx-central-1 (migración jun 2026)
+
+- **Host:** `cortex-clickhouse-prod-nlb-1c811a5fd4264cda.elb.mx-central-1.amazonaws.com:8443` (self-hosted, **privado**: solo desde VPC peered).
+- **DB:** `t1_envios` (mismas tablas que el SaaS retirado).
+- **TLS self-signed:** requiere CA (`/Users/antarnakid/Desktop/DashboardT1/ch-ca.pem`).
+- **Usuario `antar`** = solo-lectura sobre `t1_envios.*` (no toca `raw_*` ni `staging`).
+- **Credenciales:** `conciliacion/.env.local` (sobreescribe `data-platform/.env.local`). El bloque `CH_*` ya incluye `CH_CA_PATH` y `CH_SERVER_HOSTNAME`.
+
+### Cómo conectar desde laptop (DEV)
+
+El cluster es **privado**. Hay que abrir un túnel SSM antes de cualquier sync. Profile AWS `cortex-ch` configurado en `~/.aws/credentials`.
+
+```bash
+# 1) Asegurar el plugin (una vez)
+brew install --cask session-manager-plugin   # si falla por sudo, ver /tmp/sessionmanager-bundle/
+
+# 2) Levantar túnel — deja esta terminal abierta
+aws ssm start-session --profile cortex-ch \
+  --region mx-central-1 \
+  --target i-0a2b6bd3136982281 \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters '{"host":["cortex-clickhouse-prod-nlb-1c811a5fd4264cda.elb.mx-central-1.amazonaws.com"],"portNumber":["8443"],"localPortNumber":["8443"]}'
+
+# 3) En otra terminal, correr el sync de siempre
+.venv/bin/python -m conciliacion.cli sync-ch
+```
+
+`CH_HOST=127.0.0.1` en `.env.local` + `CH_SERVER_HOSTNAME=<FQDN>` para que la validación de cert pase aunque el socket vaya por el túnel.
+
+### Cómo conectar en Cloud (Railway)
+
+Railway corre **dentro del VPC peered**, así que pega el FQDN directo:
+- En Railway → vars: `CH_HOST=<FQDN>`, `CH_PORT=8443`, `CH_USER`, `CH_PASSWORD`, `CH_DATABASE=t1_envios`, `CH_SECURE=true`, `CH_CA_PATH=/app/ch-ca.pem` (subir el cert al deploy), **NO** poner `CH_SERVER_HOSTNAME` (el host ya es el FQDN).
+
+### Tablas
+
+- `fct_shipments` — engine `ReplicatedReplacingMergeTree` ordered by `shipment_id`. Cols: `shipment_id, shipment_number, carrier_name, service_name, service_type, seller_id, seller_name, seller_level_name, sale_price, carrier_cost, package_value, created_at, delivered_at, has_insurance, shipment_status, tracking_external_family, shipping_type, destination_state, destination_city, origin_state, quotation_folio`.
+- `fct_wallet_transactions` — engine `ReplicatedReplacingMergeTree` ordered by `transaction_id`. Cols: `transaction_id, seller_id, seller_name, transaction_type_name, transaction_direction, service_type, status, reference, reference_type, amount, fee_amount, transaction_date, created_at`.
+- `fct_wallet_recharges` — engine `ReplicatedReplacingMergeTree` ordered by `recharge_id`. Cols: `recharge_id, seller_id, seller_name, method, method_name, reload_type, service_type, status, amount, net_amount, created_at`.
+
+### Dedup en el nuevo schema
+
+**El campo `_synced_at` ya NO existe.** El patrón viejo `argMax(field, _synced_at)` debe reemplazarse por:
+```sql
+SELECT … FROM t1_envios.fct_shipments FINAL …
+```
+`FINAL` deja una fila por sorting-key. Si todavía necesitás colapsar por otra llave (ej. `shipment_number` con varios `shipment_id`), usa `argMax(field, created_at)` tras el FINAL.
+
+### 🚨 Blocker abierto: `seller_configuration_name` (payment_model) NO está en el schema nuevo
+
+`fct_shipments` ya no expone `seller_configuration_name`, por lo que `ch_sync.sync_shipments` rellena `ch_shipments.payment_model = ''`. Eso rompe la bifurcación `Prepago` vs `Prepago sin saldo` en `reconcile.py` (todo cae al default). **Acción para DBA:** que vuelvan a exponer ese campo en `t1_envios.*` — idealmente en `fct_shipments` directo, o como join contra `dim_seller` / nueva tabla `dim_commerce_payment`. El sync emite un aviso al primer run con el detalle.
 
 ## 6. Comandos
 

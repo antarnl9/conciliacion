@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 .DS_Store
 .pytest_cache/
+
+# backups timestamped de .env.local
+.env.local.bak.*

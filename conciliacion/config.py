@@ -31,6 +31,17 @@ def _load_ch_env() -> dict:
 
 
 def ch_settings() -> dict:
+    """Devuelve kwargs para `clickhouse_connect.get_client(**ch_settings())`.
+
+    Variables:
+      CH_HOST, CH_PORT, CH_USER, CH_PASSWORD, CH_DATABASE, CH_SECURE — básicos.
+      CH_CA_PATH                  — path al CA bundle si el cert es self-signed
+                                    (ej. cluster privado de mx-central-1).
+      CH_SERVER_HOSTNAME          — FQDN para SNI/cert-validation cuando
+                                    CH_HOST=127.0.0.1 (caso del túnel SSM).
+      CH_VERIFY                   — `false` para apagar verificación TLS
+                                    (NO usar en prod).
+    """
     e = _load_ch_env()
     host = e.get("CH_HOST")
     if not host:
@@ -38,7 +49,7 @@ def ch_settings() -> dict:
             "Falta CH_HOST. Pon las credenciales en conciliacion/.env.local "
             "o asegúrate de que data-platform/.env.local exista."
         )
-    return dict(
+    cfg = dict(
         host=host,
         port=int(e.get("CH_PORT", "8443")),
         username=e.get("CH_USER", "default"),
@@ -46,6 +57,14 @@ def ch_settings() -> dict:
         secure=str(e.get("CH_SECURE", "true")).lower() == "true",
         database=e.get("CH_DATABASE", "t1_envios"),
     )
+    if cfg["secure"]:
+        if e.get("CH_CA_PATH"):
+            cfg["ca_cert"] = e["CH_CA_PATH"]
+        if e.get("CH_SERVER_HOSTNAME"):
+            cfg["server_host_name"] = e["CH_SERVER_HOSTNAME"]
+        if e.get("CH_VERIFY") is not None:
+            cfg["verify"] = str(e["CH_VERIFY"]).lower() == "true"
+    return cfg
 
 # --- Supabase (Auth + Storage) ---
 def _load_env(prefix: str) -> dict:
