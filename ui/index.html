@@ -481,7 +481,7 @@ views.costos=async function(){
        <div style="font-weight:700;color:#1F2937;font-size:14px;margin-bottom:6px">Combustible por periodo</div>
        <div class="muted" style="font-size:12px;margin-bottom:10px">% que se suma al costo. Cada periodo es un rango de fechas (semanal o mensual).</div>
        <div id="fuel-grid"></div>
-       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="gridAdd('fuel-grid')">+ Periodo</button><button class="btn-primary" onclick="saveCombustible()">Guardar combustible</button></div>
+       <div style="display:flex;gap:8px;margin-top:10px"><button class="btn-secondary" onclick="fuelAdd()">+ Periodo</button><button class="btn-primary" onclick="saveCombustible()">Guardar combustible</button></div>
      </div>
      <div class="card" style="padding:16px">
        <div style="font-weight:700;color:#1F2937;font-size:14px;margin-bottom:6px">Recargos / extras</div>
@@ -592,13 +592,7 @@ async function loadCostos(){
   $('#cost-vd').value=((cosAll[0]&&cosAll[0].vigencia_desde)||'').slice(0,10);
   $('#cost-vh').value=((cosAll[0]&&cosAll[0].vigencia_hasta)||'').slice(0,10);
   renderSvcTabs(); await loadCostoSvc();
-  gridInit('fuel-grid',[
-    {k:'vigencia_desde',label:'Desde',type:'date',w:140},
-    {k:'vigencia_hasta',label:'Hasta',type:'date',w:140},
-    {k:'servicio',label:'Servicio',w:100,ph:'(general)'},
-    {k:'pct',label:'% combustible',type:'number',w:120}
-  ],
-    fue.map(r=>({vigencia_desde:(r.vigencia_desde||'').slice(0,10),vigencia_hasta:(r.vigencia_hasta||'').slice(0,10),servicio:r.servicio||'',pct:r.pct!=null?+(r.pct*100).toFixed(2):''})));
+  renderFuelGrid(fue);
   gridInit('rec-grid',[{k:'concepto',label:'Concepto',w:200,ph:'Zona extendida'},{k:'columna',label:'Columna del Acre',w:200,ph:'ODA'}],
     rec.length ? rec.map(r=>({concepto:r.concepto||'',columna:r.columna||''})) : (RECARGOS_SUG[COSTC]||[]).map(r=>({concepto:r.concepto,columna:r.columna})));
 }
@@ -608,13 +602,117 @@ window.saveCostos=async function(){
   const r=await jpost('/api/costos',{carrier:COSTC,servicio:COSTSVC,vigencia_desde:$('#cost-vd').value||null,vigencia_hasta:$('#cost-vh').value||null,rows});
   $('#job').innerHTML=`<span class="dot ok"></span>tarifa ${carLbl(COSTC)} · ${svcNombre(COSTSVC)} (${r.filas})`;
 };
-window.saveCombustible=async function(){
-  const rows=gridReadRows('fuel-grid').map(r=>({
-    vigencia_desde:r.vigencia_desde||null,
-    vigencia_hasta:r.vigencia_hasta||null,
-    servicio:(r.servicio||'').trim()||null,
-    pct:r.pct===''?null:Number(r.pct)/100
+// Combustible: por default muestra los 2 períodos más recientes + acordeón histórico
+// por año. window.FUEL_ROWS guarda el modelo completo; cuando se cambian filas
+// (agregar / borrar) se hace render incremental sin perder el resto.
+window.FUEL_ROWS = [];
+window.FUEL_EXPAND_HIST = false;
+window.FUEL_EXPAND_YEAR = new Set();
+
+function renderFuelGrid(fue){
+  // Normalizar: tomar todas las filas tal como vienen del backend
+  window.FUEL_ROWS = (fue||[]).map(r=>({
+    vigencia_desde:(r.vigencia_desde||'').slice(0,10),
+    vigencia_hasta:(r.vigencia_hasta||'').slice(0,10),
+    servicio:r.servicio||'',
+    pct:r.pct!=null?+(r.pct*100).toFixed(2):''
   }));
+  // Ordenar por desde desc para que el más reciente quede arriba
+  window.FUEL_ROWS.sort((a,b)=>(b.vigencia_desde||'').localeCompare(a.vigencia_desde||''));
+  renderFuelView();
+}
+
+function fuelYear(r){ return (r.vigencia_desde||'').slice(0,4) || '—'; }
+
+function renderFuelView(){
+  const host=$('#fuel-grid'); if(!host)return;
+  // Cuántas filas "recientes" mostrar siempre (las primeras N por fecha desc).
+  // Usamos 2 períodos (cada período puede tener varias filas si hay varios servicios).
+  const VISIBLE_PERIODS=2;
+  const periodKey=r=>`${r.vigencia_desde}|${r.vigencia_hasta}`;
+  const seenPeriods=[];
+  const visible=[], hidden=[];
+  window.FUEL_ROWS.forEach(r=>{
+    const pk=periodKey(r);
+    if(!seenPeriods.includes(pk)){
+      if(seenPeriods.length<VISIBLE_PERIODS) seenPeriods.push(pk);
+    }
+    if(seenPeriods.includes(pk)) visible.push(r); else hidden.push(r);
+  });
+
+  const fmtPct=v=>v===''||v==null?'':(+v).toFixed(2);
+  const rowHtml=(r,i,inHistorical)=>`
+    <tr data-i="${i}" data-hist="${inHistorical?1:0}">
+      <td><input type="date" value="${r.vigencia_desde||''}" onchange="fuelEdit(${i},'vigencia_desde',this.value)" style="width:140px"></td>
+      <td><input type="date" value="${r.vigencia_hasta||''}" onchange="fuelEdit(${i},'vigencia_hasta',this.value)" style="width:140px"></td>
+      <td><input type="text" value="${r.servicio||''}" placeholder="(general)" onchange="fuelEdit(${i},'servicio',this.value)" style="width:100px"></td>
+      <td><input type="number" step="0.01" value="${fmtPct(r.pct)}" onchange="fuelEdit(${i},'pct',this.value)" style="width:110px;text-align:right"></td>
+      <td style="text-align:right"><button class="kebab" title="Eliminar" onclick="fuelRemove(${i})">✕</button></td>
+    </tr>`;
+  const headHtml=`<thead><tr>
+    <th style="text-align:left;padding:6px 8px;font-size:12px;color:var(--gray-600);font-weight:600">Desde</th>
+    <th style="text-align:left;padding:6px 8px;font-size:12px;color:var(--gray-600);font-weight:600">Hasta</th>
+    <th style="text-align:left;padding:6px 8px;font-size:12px;color:var(--gray-600);font-weight:600">Servicio</th>
+    <th style="text-align:left;padding:6px 8px;font-size:12px;color:var(--gray-600);font-weight:600">% combustible</th>
+    <th></th></tr></thead>`;
+
+  // Agrupar el histórico por año
+  const histByYear={};
+  hidden.forEach((r,offset)=>{
+    const realIdx=visible.length+offset;
+    const y=fuelYear(r);
+    (histByYear[y]||(histByYear[y]=[])).push({...r,_idx:realIdx});
+  });
+  const years=Object.keys(histByYear).sort().reverse();
+
+  let html=`<table style="width:100%;border-collapse:separate;border-spacing:0 4px;font-size:13px">${headHtml}<tbody>`;
+  visible.forEach((r,i)=>{ html+=rowHtml(r,i,false); });
+  html+=`</tbody></table>`;
+
+  if(hidden.length>0){
+    html+=`<div style="margin-top:10px;border-top:1px dashed var(--gray-200);padding-top:8px">
+      <button type="button" onclick="fuelToggleHist()" class="btn-secondary btn-sm" style="background:transparent;border:none;color:var(--blue-700);padding:4px 6px;font-weight:600;cursor:pointer">
+        ${window.FUEL_EXPAND_HIST?'▲ Ocultar histórico':'▼ Ver histórico'} (${hidden.length})
+      </button>`;
+    if(window.FUEL_EXPAND_HIST){
+      years.forEach(y=>{
+        const rowsY=histByYear[y];
+        const open=window.FUEL_EXPAND_YEAR.has(y);
+        html+=`<div style="margin-top:6px;border:1px solid var(--gray-200);border-radius:6px;background:#FAFBFC">
+          <div style="padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:6px;font-weight:600;color:var(--gray-700);font-size:13px" onclick="fuelToggleYear('${y}')">
+            ${open?'▼':'▶'} ${y} <span class="muted" style="font-weight:400;font-size:11.5px">(${rowsY.length})</span>
+          </div>`;
+        if(open){
+          html+=`<div style="padding:6px 10px 10px 10px"><table style="width:100%;border-collapse:separate;border-spacing:0 4px;font-size:13px">${headHtml}<tbody>`;
+          rowsY.forEach(r=>{ html+=rowHtml(r,r._idx,true); });
+          html+=`</tbody></table></div>`;
+        }
+        html+=`</div>`;
+      });
+    }
+    html+=`</div>`;
+  }
+  host.innerHTML=html;
+}
+
+window.fuelEdit=(i,field,val)=>{ if(!window.FUEL_ROWS[i])return; window.FUEL_ROWS[i][field]=val; };
+window.fuelRemove=i=>{ window.FUEL_ROWS.splice(i,1); renderFuelView(); };
+window.fuelToggleHist=()=>{ window.FUEL_EXPAND_HIST=!window.FUEL_EXPAND_HIST; renderFuelView(); };
+window.fuelToggleYear=y=>{ if(window.FUEL_EXPAND_YEAR.has(y))window.FUEL_EXPAND_YEAR.delete(y); else window.FUEL_EXPAND_YEAR.add(y); renderFuelView(); };
+window.fuelAdd=()=>{
+  window.FUEL_ROWS.unshift({vigencia_desde:'',vigencia_hasta:'',servicio:'',pct:''});
+  renderFuelView();
+};
+
+window.saveCombustible=async function(){
+  const rows=(window.FUEL_ROWS||[])
+    .filter(r=>r.vigencia_desde||r.vigencia_hasta||r.pct!==''||r.servicio)
+    .map(r=>({
+      vigencia_desde:r.vigencia_desde||null,
+      vigencia_hasta:r.vigencia_hasta||null,
+      servicio:(r.servicio||'').trim()||null,
+      pct:r.pct===''||r.pct==null?null:Number(r.pct)/100
+    }));
   const r=await jpost('/api/combustible',{carrier:COSTC,rows});
   $('#job').innerHTML=`<span class="dot ok"></span>combustible ${carLbl(COSTC)} guardado (${r.filas})`;
 };
