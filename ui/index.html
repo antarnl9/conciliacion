@@ -380,12 +380,67 @@ function renderTarBody(){
   } else if(m==='flat'){
     editor=`<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px"><button class="btn-secondary" onclick="addTarifa()">+ Fila</button><button class="btn-primary" onclick="saveTarifas()">Guardar tarifas</button></div><div id="tar-grid"></div>`;
   }
-  $('#tar-body').innerHTML=carSel+editor+`<div id="tar-preview" style="margin-top:18px"></div>`;
+  const filesBlock=`
+    <div class="card" style="padding:16px;margin-top:18px" id="tar-files-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <div style="font-weight:700;color:#1F2937;font-size:14px">Tarifa generada (compartible)</div>
+          <div class="muted" style="font-size:12px">Se actualiza al cambiar método o margen. Cada versión queda en respaldo para auditoría.</div>
+        </div>
+        <button class="btn-secondary btn-sm" onclick="regenerarTarifaCliente()" id="b-regen">↻ Regenerar ahora</button>
+      </div>
+      <div id="tar-files-list"></div>
+    </div>`;
+  $('#tar-body').innerHTML=carSel+editor+`<div id="tar-preview" style="margin-top:18px"></div>`+filesBlock;
   if(m==='margen_zona') loadMargenZona();
   else if(m==='margen_kilo') loadMargenKilo();
   else if(m==='flat') loadTarifas();
   loadPreview();
+  loadTarifaArchivos();
 }
+
+window.loadTarifaArchivos=async function(){
+  const host=$('#tar-files-list'); if(!host||!TAR.seller_id)return;
+  const files=await jget('/api/cliente/tarifa-archivos?seller_id='+TAR.seller_id).catch(()=>[]);
+  if(!files||!files.length){
+    host.innerHTML=`<div class="muted" style="font-size:12.5px;padding:10px 0">Aún no se ha generado tarifa. Configura método + margen o haz clic en <b>Regenerar ahora</b>.</div>`;
+    return;
+  }
+  const fmtDate=s=>(s||'').replace('T',' ').slice(0,16);
+  const fmtBytes=b=>b<1024?`${b}B`:`${(b/1024).toFixed(0)}KB`;
+  host.innerHTML=files.map((f,i)=>`
+    <div style="display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:6px;${i===0?'background:#F0FDF4':'background:#FAFBFC'}">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;color:#1F2937;font-size:13px">
+          ${i===0?'<span class="badge b-green" style="font-size:9px;padding:1px 6px;margin-right:6px">Vigente</span>':''}
+          Versión ${f.version} · ${carLbl(f.carrier)}
+        </div>
+        <div class="muted" style="font-size:11.5px">
+          ${fmtDate(f.created_at)} · método ${f.metodo||'—'} · margen ${f.margen!=null?(+f.margen*100).toFixed(2)+'%':'—'} · ${fmtBytes(f.bytes||0)}
+        </div>
+      </div>
+      <button class="btn-primary btn-sm" onclick="descargarTarifaCliente(${f.version})">Descargar</button>
+    </div>`).join('');
+};
+
+window.regenerarTarifaCliente=async function(){
+  if(!TAR.seller_id){alert('Selecciona un cliente.');return;}
+  const b=$('#b-regen'); if(b){b.disabled=true; b.textContent='Generando…';}
+  try{
+    const r=await jpost(`/api/cliente/tarifa-generar?seller_id=${TAR.seller_id}&carrier=${encodeURIComponent(TAR.carrier||'dhl')}`);
+    if(r&&r.error){alert('Error: '+r.error); return;}
+    $('#job').innerHTML=`<span class="dot ok"></span>tarifa v${r.version||'?'} subida (${r.bytes||0}B)`;
+    await loadTarifaArchivos();
+  }finally{
+    const b2=$('#b-regen'); if(b2){b2.disabled=false; b2.textContent='↻ Regenerar ahora';}
+  }
+};
+
+window.descargarTarifaCliente=async function(version){
+  const r=await jget(`/api/cliente/tarifa-archivo?seller_id=${TAR.seller_id}&version=${version}`);
+  if(r&&r.url){ window.open(r.url, '_blank'); }
+  else { alert('No se pudo generar la URL de descarga.'); }
+};
 window.onCarrier=function(){ TAR.carrier=$('#t-carrier').value; if(TAR.cobro==='flat')loadTarifas(); loadPreview(); };
 function tarGridHTML(rows){
   const body=(rows.length?rows:[{}]).map((r,i)=>

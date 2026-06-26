@@ -415,12 +415,16 @@ def tarifas_clientes():
 @app.post("/api/cliente/cobro")
 def set_cobro(payload: dict):
     """Configura el cobro de un cliente de crédito: método, margen y días de crédito.
-    Hace merge: solo cambia los campos enviados, conserva los demás."""
+    Hace merge: solo cambia los campos enviados, conserva los demás.
+    Si cambia método o margen, dispara la regeneración del xlsx del tarifario
+    en background (no bloquea la respuesta)."""
     con = db.connect()
     try:
         sid = int(payload["seller_id"])
         cur = con.execute("SELECT metodo, margen, dias_credito, cliente FROM config_credito WHERE seller_id = ?",
                           [sid]).fetchone()
+        prev_metodo = cur[0] if cur else None
+        prev_margen = cur[1] if cur else None
         metodo = payload.get("cobro_tipo") or (cur[0] if cur else "automatica")
         margen = _f(payload["margen"]) if "margen" in payload else (cur[1] if cur else None)
         dias = _i(payload["dias_credito"]) if "dias_credito" in payload else (cur[2] if cur else None)
@@ -429,9 +433,118 @@ def set_cobro(payload: dict):
         con.execute("""INSERT INTO config_credito
             (seller_id, cliente, metodo, valor, nota, margen, dias_credito) VALUES (?,?,?,?,?,?,?)""",
             [sid, cliente, metodo, None, None, margen, dias])
+        # Si cambió método o margen, regenerar tarifa del cliente en background.
+        # NO bloqueamos la respuesta del UI — si Supabase está lento, no se siente.
+        cambio_relevante = (metodo != prev_metodo) or ((margen or 0) != (prev_margen or 0))
+        if cambio_relevante and metodo not in ("automatica",) and (margen is not None):
+            jobs.run(f"tarifa-gen-{sid}", lambda sid=sid, cli=cliente: _generar_tarifa_xlsx(sid, cli or str(sid), "dhl"))
         return {"ok": True}
     finally:
         con.close()
+
+
+# ---- Tarifa del cliente: genera xlsx, sube a Supabase y registra histórico ----
+def _generar_tarifa_xlsx(seller_id: int, cliente: str, carrier: str = "dhl") -> dict:
+    """Calcula la matriz preview para el cliente, arma el xlsx con formato
+    visual de las paqueterías, sube a Supabase Storage y guarda metadata."""
+    from .. import tarifa_export, supa  # importa local para evitar ciclos en cold start
+    # 1. Calcular la matriz preview (re-uso del endpoint interno)
+    preview = tarifa_preview(seller_id=seller_id, carrier=carrier)
+    rows = preview.get("rows") or []
+    metodo = preview.get("metodo") or "automatica"
+    iva = preview.get("iva") or 0.16
+    con = db.connect()
+    try:
+        # margen guardado
+        cur = con.execute("SELECT margen FROM config_credito WHERE seller_id=?", [seller_id]).fetchone()
+        margen = cur[0] if cur else None
+        # combustible vigente por servicio (snapshot al momento de generar)
+        fuel_rows = con.execute("""
+            SELECT COALESCE(servicio,''), pct, vigencia_desde, vigencia_hasta
+            FROM combustible WHERE carrier=?
+              AND current_date BETWEEN COALESCE(vigencia_desde, DATE '1900-01-01')
+                                   AND COALESCE(vigencia_hasta, DATE '2999-01-01')
+            ORDER BY COALESCE(servicio,'')""", [carrier]).fetchall()
+        fuel_por_servicio: dict[str, float] = {}
+        vd = vh = None
+        for svc, pct, vfrom, vto in fuel_rows:
+            fuel_por_servicio[svc or ""] = float(pct or 0)
+            vd = vfrom; vh = vto
+        # 2. Generar xlsx
+        xlsx_bytes = tarifa_export.build_xlsx(
+            seller_id=seller_id, cliente=cliente, carrier=carrier,
+            metodo=metodo, margen=margen, iva=iva,
+            vigencia_desde=str(vd) if vd else None,
+            vigencia_hasta=str(vh) if vh else None,
+            rows=rows, fuel_por_servicio=fuel_por_servicio,
+        )
+        # 3. Versionar
+        prev = con.execute(
+            "SELECT COALESCE(MAX(version),0) FROM tarifas_cliente_archivos WHERE seller_id=?",
+            [seller_id]).fetchone()
+        version = int((prev[0] if prev else 0) or 0) + 1
+        path = tarifa_export.storage_path(seller_id, version)
+        filename = f"tarifa_{carrier}_{cliente or seller_id}_v{version}.xlsx"
+        # 4. Subir a Supabase Storage (puede tirar si las credenciales no están)
+        try:
+            supa.upload(path, xlsx_bytes,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        except Exception as e:
+            return {"ok": False, "error": f"Supabase upload falló: {e}"}
+        # 5. Registrar metadata
+        from datetime import datetime
+        con.execute("""INSERT INTO tarifas_cliente_archivos
+            (seller_id, cliente, carrier, version, metodo, margen, iva,
+             vigencia_desde, vigencia_hasta, supabase_path, filename, bytes, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [seller_id, cliente, carrier, version, metodo, margen, iva,
+             vd, vh, path, filename, len(xlsx_bytes), datetime.utcnow()])
+        return {"ok": True, "version": version, "path": path, "bytes": len(xlsx_bytes), "filename": filename}
+    finally:
+        con.close()
+
+
+@app.post("/api/cliente/tarifa-generar")
+def cliente_tarifa_generar(seller_id: int = Query(...), carrier: str = Query("dhl")):
+    """Regenera el xlsx de tarifa para un cliente (manual). Devuelve la versión nueva."""
+    con = db.connect()
+    try:
+        cur = con.execute("SELECT cliente FROM config_credito WHERE seller_id=?", [seller_id]).fetchone()
+        cliente = (cur[0] if cur else None) or str(seller_id)
+    finally:
+        con.close()
+    return _generar_tarifa_xlsx(seller_id, cliente, carrier)
+
+
+@app.get("/api/cliente/tarifa-archivos")
+def cliente_tarifa_archivos(seller_id: int):
+    """Lista las versiones de tarifa generadas para un cliente, más reciente primero."""
+    con = db.connect()
+    try:
+        return _rows(con, """
+            SELECT version, carrier, metodo, margen, iva,
+                   vigencia_desde, vigencia_hasta, supabase_path, filename, bytes, created_at
+            FROM tarifas_cliente_archivos
+            WHERE seller_id=? ORDER BY version DESC""", [seller_id])
+    finally:
+        con.close()
+
+
+@app.get("/api/cliente/tarifa-archivo")
+def cliente_tarifa_archivo(seller_id: int, version: int):
+    """Devuelve una URL firmada para descargar el xlsx de una versión."""
+    from .. import supa
+    con = db.connect()
+    try:
+        cur = con.execute("""SELECT supabase_path, filename FROM tarifas_cliente_archivos
+                             WHERE seller_id=? AND version=?""", [seller_id, version]).fetchone()
+        if not cur:
+            return {"error": "no encontrada"}
+        path, filename = cur[0], cur[1]
+    finally:
+        con.close()
+    url = supa.signed_url(path, expires=3600)
+    return {"url": url, "filename": filename, "path": path}
 
 
 @app.get("/api/tarifas")

@@ -221,3 +221,21 @@ CREATE TABLE IF NOT EXISTS sync_meta (
     filas      BIGINT,
     corrido_en TIMESTAMP
 );
+
+-- Tarifas generadas para clientes de crédito: cada versión queda como xlsx
+-- en Supabase Storage. Esta tabla es el índice/histórico para auditoría.
+CREATE TABLE IF NOT EXISTS tarifas_cliente_archivos (
+    seller_id        BIGINT,
+    cliente          VARCHAR,
+    carrier          VARCHAR,
+    version          INTEGER,        -- monotónico por seller_id
+    metodo           VARCHAR,        -- automatica / margen_global / margen_zona / margen_kilo / flat
+    margen           DOUBLE,         -- margen aplicado (0.14 = 14%)
+    iva              DOUBLE,
+    vigencia_desde   DATE,
+    vigencia_hasta   DATE,
+    supabase_path    VARCHAR,        -- ej. tarifas/clientes/12345/2026-06-26_v1.xlsx
+    filename         VARCHAR,        -- nombre descargable
+    bytes            BIGINT,
+    created_at       TIMESTAMP
+);
