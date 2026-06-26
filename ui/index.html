@@ -507,8 +507,13 @@ async function loadCostos(){
   $('#cost-vd').value=((cosAll[0]&&cosAll[0].vigencia_desde)||'').slice(0,10);
   $('#cost-vh').value=((cosAll[0]&&cosAll[0].vigencia_hasta)||'').slice(0,10);
   renderSvcTabs(); await loadCostoSvc();
-  gridInit('fuel-grid',[{k:'vigencia_desde',label:'Desde',type:'date',w:150},{k:'vigencia_hasta',label:'Hasta',type:'date',w:150},{k:'pct',label:'% combustible',type:'number',w:110}],
-    fue.map(r=>({vigencia_desde:(r.vigencia_desde||'').slice(0,10),vigencia_hasta:(r.vigencia_hasta||'').slice(0,10),pct:r.pct!=null?+(r.pct*100).toFixed(2):''})));
+  gridInit('fuel-grid',[
+    {k:'vigencia_desde',label:'Desde',type:'date',w:140},
+    {k:'vigencia_hasta',label:'Hasta',type:'date',w:140},
+    {k:'servicio',label:'Servicio',w:100,ph:'(general)'},
+    {k:'pct',label:'% combustible',type:'number',w:120}
+  ],
+    fue.map(r=>({vigencia_desde:(r.vigencia_desde||'').slice(0,10),vigencia_hasta:(r.vigencia_hasta||'').slice(0,10),servicio:r.servicio||'',pct:r.pct!=null?+(r.pct*100).toFixed(2):''})));
   gridInit('rec-grid',[{k:'concepto',label:'Concepto',w:200,ph:'Zona extendida'},{k:'columna',label:'Columna del Acre',w:200,ph:'ODA'}],
     rec.length ? rec.map(r=>({concepto:r.concepto||'',columna:r.columna||''})) : (RECARGOS_SUG[COSTC]||[]).map(r=>({concepto:r.concepto,columna:r.columna})));
 }
@@ -519,7 +524,12 @@ window.saveCostos=async function(){
   $('#job').innerHTML=`<span class="dot ok"></span>tarifa ${carLbl(COSTC)} · ${svcNombre(COSTSVC)} (${r.filas})`;
 };
 window.saveCombustible=async function(){
-  const rows=gridReadRows('fuel-grid').map(r=>({vigencia_desde:r.vigencia_desde||null,vigencia_hasta:r.vigencia_hasta||null,pct:r.pct===''?null:Number(r.pct)/100}));
+  const rows=gridReadRows('fuel-grid').map(r=>({
+    vigencia_desde:r.vigencia_desde||null,
+    vigencia_hasta:r.vigencia_hasta||null,
+    servicio:(r.servicio||'').trim()||null,
+    pct:r.pct===''?null:Number(r.pct)/100
+  }));
   const r=await jpost('/api/combustible',{carrier:COSTC,rows});
   $('#job').innerHTML=`<span class="dot ok"></span>combustible ${carLbl(COSTC)} guardado (${r.filas})`;
 };

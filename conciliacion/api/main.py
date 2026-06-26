@@ -556,28 +556,33 @@ def save_costos(payload: dict):
         con.close()
 
 
-# ---- Combustible (fuel) por periodo ----
+# ---- Combustible (fuel) por periodo + servicio ----
 @app.get("/api/combustible")
 def get_combustible(carrier: str = "dhl"):
     con = db.connect()
     try:
-        return _rows(con, """SELECT vigencia_desde, vigencia_hasta, pct FROM combustible
-                             WHERE carrier=? ORDER BY vigencia_desde""", [carrier])
+        return _rows(con, """SELECT vigencia_desde, vigencia_hasta, pct, servicio FROM combustible
+                             WHERE carrier=? ORDER BY vigencia_desde, COALESCE(servicio,'')""", [carrier])
     finally:
         con.close()
 
 
 @app.post("/api/combustible")
 def save_combustible(payload: dict):
+    """Reemplaza el rate card de combustible del carrier. Cada row puede llevar
+    `servicio` (vacío = aplica a cualquier servicio). NO destruye histórico de
+    otros carriers — solo del carrier indicado."""
     carrier = payload.get("carrier", "dhl")
     rows = payload.get("rows", [])
     con = db.connect()
     try:
         con.execute("DELETE FROM combustible WHERE carrier=?", [carrier])
         for r in rows:
-            con.execute("INSERT INTO combustible VALUES (?,?,?,?)",
-                        [carrier, r.get("vigencia_desde") or None, r.get("vigencia_hasta") or None,
-                         _f(r.get("pct"))])
+            con.execute("""INSERT INTO combustible
+                (carrier, vigencia_desde, vigencia_hasta, pct, servicio)
+                VALUES (?,?,?,?,?)""",
+                [carrier, r.get("vigencia_desde") or None, r.get("vigencia_hasta") or None,
+                 _f(r.get("pct")), (str(r.get("servicio", "")).strip() or None)])
         return {"ok": True, "filas": len(rows)}
     finally:
         con.close()
