@@ -82,6 +82,20 @@
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:100}
   .modal-overlay.show{display:flex}
   .modal{background:#fff;border-radius:14px;width:540px;max-width:92vw;max-height:88vh;overflow:auto;box-shadow:0 12px 44px rgba(0,0,0,.25)}
+  .modal-wide{width:900px}
+  /* Drop zone por paqueteria */
+  .car-card{border:1px solid var(--gray-200);border-radius:10px;padding:14px;margin-bottom:10px;background:#fff}
+  .car-card.off{opacity:.5;background:#FAFBFC}
+  .car-card-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .car-card-head .nm{flex:1;font-weight:700;color:var(--gray-900);font-size:14px;display:flex;align-items:center;gap:8px}
+  .dropzone{border:2px dashed #CBD5E1;border-radius:8px;padding:18px;text-align:center;color:var(--gray-600);font-size:13px;cursor:pointer;transition:all .15s ease;background:#FAFBFC}
+  .dropzone:hover{border-color:#94A3B8;background:#F4F8FF}
+  .dropzone.dragover{border-color:var(--blue-700);background:#E0F2FE;color:var(--blue-700)}
+  .dropzone .strong{color:var(--blue-700);font-weight:600}
+  .file-chip{display:inline-flex;align-items:center;gap:6px;background:#F4F8FF;border:1px solid #CBD5E1;border-radius:6px;padding:5px 9px;font-size:12px;margin:4px 4px 0 0;color:var(--oxford);font-weight:500}
+  .file-chip .rm{cursor:pointer;color:#94A3B8;font-weight:700;padding:0 2px}
+  .file-chip .rm:hover{color:var(--red-700)}
+  .file-list{margin-top:8px}
   .modal-head{display:flex;align-items:center;gap:10px;padding:18px 22px;border-bottom:1px solid var(--gray-200)}
   .modal-head h3{margin:0;font-size:18px;font-weight:700;color:var(--gray-900);flex:1}
   .modal-head .x{background:none;color:var(--gray-600);width:30px;height:30px;padding:0;font-size:16px}
@@ -169,7 +183,7 @@
 <main><div id="view"></div></main>
 
 <div class="modal-overlay" id="modal">
-  <div class="modal">
+  <div class="modal modal-wide">
     <div class="modal-head"><h3 id="cm-title">Cierre de mes</h3><button class="x" onclick="closeModal()">✕</button></div>
     <div class="modal-body" id="cm-body"></div>
     <div class="modal-foot" id="cm-foot"></div>
@@ -716,35 +730,86 @@ window.repGuias=repGuias;
 
 // ---- modal: cierre de mes ----
 const SUPPORTED=['dhl','fedex','paquete_express','paquete_express_2'];
+// Files por carrier: { dhl: [File, File, ...], fedex: [...], ... }
+window.CM_FILES = {};
+
 window.openCierreModal=async function(mes){
   const meses=await jget('/api/cierre/meses');
   const m=mes||(meses.find(x=>x.estatus!=='cerrado')||meses[0]||{}).mes||'';
   $('#cm-title').textContent = mes ? `Editar cierre · ${mes}` : 'Cierre de mes';
+  window.CM_FILES = {}; CARRIERS.forEach(c=>{ window.CM_FILES[c]=[]; });
   $('#cm-body').innerHTML=`
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--blue-100);border:1px solid var(--gray-200);border-radius:9px;padding:11px 13px;margin-bottom:18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--blue-100);border:1px solid var(--gray-200);border-radius:9px;padding:11px 13px;margin-bottom:14px">
       <div><div style="font-weight:600;color:var(--oxford);font-size:13px">Datos del sistema</div>
         <div class="muted" style="font-size:11.5px">Trae los envíos y cobros más recientes del sistema. Hazlo antes de cerrar.</div></div>
       <button class="btn-secondary btn-sm" id="b-sync" onclick="syncCH()" style="white-space:nowrap">Sincronizar</button>
     </div>
-    <label class="lblform">Mes a cerrar</label>
-    <input type="month" id="cm-mes" style="width:100%;margin-bottom:18px">
+    <div style="display:flex;gap:14px;align-items:flex-end;margin-bottom:14px">
+      <div style="flex:1"><label class="lblform">Mes a cerrar</label>
+        <input type="month" id="cm-mes" style="width:100%"></div>
+    </div>
     <label class="lblform">Archivos de paqueterías</label>
-    <div class="muted" style="font-size:12px;margin-bottom:8px">Deselecciona las paqueterías que no apliquen para este cierre. Sube el Excel de cada una.</div>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">Arrastra los Excels o haz click para seleccionar. Puedes subir <b>varios archivos por paquetería</b> (ej. distintas cuentas o sucursales). Desactiva las paqueterías que no apliquen para este cierre.</div>
     <div id="cm-carriers"></div>`;
   $('#cm-foot').innerHTML=`<button class="btn-secondary" onclick="closeModal()">Cancelar</button>
     <button class="btn-primary" id="cm-proc" onclick="procesarCierre()" disabled>Procesar cierre</button>`;
   $('#cm-mes').value=m;
   $('#cm-carriers').innerHTML=CARRIERS.map(c=>{
     const sup=SUPPORTED.includes(c);
-    return `<div class="crow${sup?'':' off'}" data-c="${c}">
-       <label class="nm"><input type="checkbox" class="cm-chk" data-c="${c}" ${sup?'checked':'disabled'} onchange="toggleCarrier('${c}')"> ${carLbl(c)}
-         ${sup?'<span class="badge b-green" style="font-size:9px;padding:1px 6px">Listo</span>':'<span class="badge b-gray" style="font-size:9px;padding:1px 6px">Próximamente</span>'}</label>
-       <label class="file"><span class="btn-primary btn-sm" ${sup?'':'style="pointer-events:none;opacity:.45"'}>Subir Excel</span><input type="file" class="cm-file" data-c="${c}" accept=".xlsx" ${sup?'':'disabled'} onchange="cmFile('${c}')"></label>
-       <span class="fname" data-c="${c}"></span>
+    return `<div class="car-card${sup?'':' off'}" data-c="${c}">
+       <div class="car-card-head">
+         <input type="checkbox" class="cm-chk" data-c="${c}" ${sup?'checked':'disabled'} onchange="toggleCarrier('${c}')">
+         <span class="nm">${carLbl(c)}
+           ${sup?'<span class="badge b-green" style="font-size:9px;padding:1px 6px">Listo</span>':'<span class="badge b-gray" style="font-size:9px;padding:1px 6px">Próximamente</span>'}</span>
+         <span class="muted" id="cm-cnt-${c}" style="font-size:11.5px"></span>
+       </div>
+       ${sup?`
+       <div class="dropzone" id="dz-${c}" onclick="document.getElementById('cm-file-${c}').click()">
+         <div><span class="strong">Arrastra archivos aquí</span> o <span class="strong">click para seleccionar</span></div>
+         <div class="muted" style="font-size:11px;margin-top:3px">.xlsx · puedes soltar varios a la vez</div>
+       </div>
+       <input type="file" id="cm-file-${c}" accept=".xlsx" multiple style="display:none" onchange="cmAddFiles('${c}',this.files)">
+       <div class="file-list" id="fl-${c}"></div>
+       `:''}
      </div>`;}).join('');
+  // Conectar drag-drop a cada zona
+  CARRIERS.filter(c=>SUPPORTED.includes(c)).forEach(c=>{
+    const dz=document.getElementById('dz-'+c);
+    if(!dz)return;
+    ['dragenter','dragover'].forEach(e=>dz.addEventListener(e,ev=>{ev.preventDefault();ev.stopPropagation();dz.classList.add('dragover');}));
+    ['dragleave','drop'].forEach(e=>dz.addEventListener(e,ev=>{ev.preventDefault();ev.stopPropagation();dz.classList.remove('dragover');}));
+    dz.addEventListener('drop',ev=>{
+      const fs=[...(ev.dataTransfer.files||[])].filter(f=>/\.xlsx$/i.test(f.name));
+      if(fs.length)cmAddFiles(c,fs);
+    });
+  });
   updateCierreCount();
   $('#modal').classList.add('show');
 };
+
+window.cmAddFiles=function(c,files){
+  if(!files||!files.length)return;
+  window.CM_FILES[c]=window.CM_FILES[c]||[];
+  [...files].forEach(f=>{
+    if(!/\.xlsx$/i.test(f.name))return;
+    // de-dup por (name,size)
+    if(window.CM_FILES[c].some(x=>x.name===f.name&&x.size===f.size))return;
+    window.CM_FILES[c].push(f);
+  });
+  renderFileList(c);
+  // reset input para permitir re-seleccionar el mismo archivo despues de removerlo
+  const inp=document.getElementById('cm-file-'+c); if(inp)inp.value='';
+  updateCierreCount();
+};
+window.cmRemoveFile=function(c,idx){
+  (window.CM_FILES[c]||[]).splice(idx,1); renderFileList(c); updateCierreCount();
+};
+function renderFileList(c){
+  const host=document.getElementById('fl-'+c); if(!host)return;
+  const files=window.CM_FILES[c]||[];
+  host.innerHTML = files.map((f,i)=>`<span class="file-chip">📎 ${f.name} <span class="muted" style="font-size:10.5px">(${(f.size/1024).toFixed(0)}KB)</span> <span class="rm" onclick="cmRemoveFile('${c}',${i})">×</span></span>`).join('');
+  const cnt=document.getElementById('cm-cnt-'+c); if(cnt)cnt.textContent=files.length?(files.length===1?'1 archivo':files.length+' archivos'):'';
+}
 window.reabrirMes=async function(mes){ if(!confirm('¿Reabrir '+mes+'? Volverá a estatus abierto para poder editarlo.'))return; await jpost('/api/cierre/reabrir?mes='+mes); if(VIEW==='cierre')views.cierre(); };
 // ---- cobranza ----
 window.cobMes=function(){ window.COBMES=$('#cob-mes').value; views.cobranza(); };
@@ -899,19 +964,22 @@ window.filtraDetalle=function(){
 };
 window.closeModal=()=>$('#modal').classList.remove('show');
 function updateCierreCount(){
-  const n=[...document.querySelectorAll('.cm-chk')].filter(c=>c.checked)
-    .filter(c=>{const fi=document.querySelector(`.cm-file[data-c="${c.dataset.c}"]`);return fi&&fi.files[0];}).length;
-  const b=$('#cm-proc'); if(b){b.textContent=n?`Procesar cierre (${n})`:'Procesar cierre';b.disabled=!n;}
+  const carriers=[...document.querySelectorAll('.cm-chk')]
+    .filter(c=>c.checked)
+    .map(c=>c.dataset.c)
+    .filter(c=>(window.CM_FILES[c]||[]).length>0);
+  const totalFiles=carriers.reduce((s,c)=>s+(window.CM_FILES[c]||[]).length,0);
+  const b=$('#cm-proc');
+  if(b){
+    b.textContent=totalFiles?`Procesar cierre (${totalFiles} ${totalFiles===1?'archivo':'archivos'} · ${carriers.length} ${carriers.length===1?'paquetería':'paqueterías'})`:'Procesar cierre';
+    b.disabled=!totalFiles;
+  }
 }
 window.toggleCarrier=c=>{
   const chk=document.querySelector(`.cm-chk[data-c="${c}"]`);
-  document.querySelector(`.crow[data-c="${c}"]`).classList.toggle('off',!chk.checked);
-  document.querySelector(`.cm-file[data-c="${c}"]`).disabled=!chk.checked;
+  document.querySelector(`.car-card[data-c="${c}"]`).classList.toggle('off',!chk.checked);
   updateCierreCount();
 };
-window.cmFile=c=>{const fi=document.querySelector(`.cm-file[data-c="${c}"]`);
-  document.querySelector(`.fname[data-c="${c}"]`).textContent=fi.files[0]?('✓ '+fi.files[0].name):'';
-  updateCierreCount();};
 async function waitIdle(){for(let i=0;i<800;i++){const s=await jget('/api/status');
   if(!Object.values(s.jobs||{}).some(j=>j.status==='running'))return; await new Promise(r=>setTimeout(r,1500));}}
 function lastJobMsg(){ return jget('/api/status').then(s=>{
@@ -922,11 +990,14 @@ function lastJobMsg(){ return jget('/api/status').then(s=>{
 window.procesarCierre=async function(){
   const mes=$('#cm-mes').value; if(!mes){alert('Selecciona el mes a cerrar');return;}
   const sel=[...document.querySelectorAll('.cm-chk')].filter(c=>c.checked).map(c=>c.dataset.c)
-    .filter(c=>{const fi=document.querySelector(`.cm-file[data-c="${c}"]`);return fi&&fi.files[0];});
+    .filter(c=>(window.CM_FILES[c]||[]).length>0);
   if(!sel.length){alert('Sube al menos un Excel de paquetería (y deja seleccionadas solo las que apliquen).');return;}
-  const files={}; sel.forEach(c=>files[c]=document.querySelector(`.cm-file[data-c="${c}"]`).files[0]);
-  const steps=[...sel.map(c=>({k:'up-'+c,label:'Subir '+carLbl(c)})),
-    {k:'rec',label:'Reconciliar guías'},{k:'cls',label:'Cerrar mes'},{k:'cob',label:'Generar cobro'}];
+  // 1 step por archivo + reconciliar + cerrar + generar cobro
+  const steps=[];
+  sel.forEach(c=>{ const fls=window.CM_FILES[c]; fls.forEach((f,i)=>{
+    steps.push({k:`up-${c}-${i}`,label:`Subir ${carLbl(c)} · ${f.name}${fls.length>1?` (${i+1}/${fls.length})`:''}`});
+  }); });
+  steps.push({k:'rec',label:'Reconciliar guías'},{k:'cls',label:'Cerrar mes'},{k:'cob',label:'Generar cobro'});
   $('#cm-title').textContent='Procesando cierre · '+mes;
   $('#cm-body').innerHTML=`<div class="plist">${steps.map(s=>
     `<div class="pstep" id="st-${s.k}"><span class="pic"></span><span>${s.label}</span><span class="pex"></span></div>`).join('')}</div>
@@ -936,11 +1007,17 @@ window.procesarCierre=async function(){
     el.querySelector('.pic').textContent=st==='done'?'✓':st==='err'?'✕':'';
     if(ex)el.querySelector('.pex').textContent=ex;};
   try{
-    for(const c of sel){ setStep('up-'+c,'run');
-      const fd=new FormData(); fd.append('file',files[c]);
-      const r=await fetch(`/api/upload/carrier?carrier=${c}&reset=true`,{method:'POST',body:fd}).then(x=>x.json()).catch(()=>({error:'fallo subida'}));
-      if(r&&r.error){setStep('up-'+c,'err',r.error); return finishProgress(mes,false);}
-      await waitIdle(); setStep('up-'+c,'done', await lastJobMsg());
+    for(const c of sel){
+      const fls=window.CM_FILES[c];
+      for(let i=0;i<fls.length;i++){
+        const k=`up-${c}-${i}`; setStep(k,'run');
+        const fd=new FormData(); fd.append('file',fls[i]);
+        // primer archivo del carrier: reset=true (limpia anteriores). los siguientes: reset=false (acumulan).
+        const reset=(i===0)?'true':'false';
+        const r=await fetch(`/api/upload/carrier?carrier=${c}&reset=${reset}`,{method:'POST',body:fd}).then(x=>x.json()).catch(()=>({error:'fallo subida'}));
+        if(r&&r.error){setStep(k,'err',r.error); return finishProgress(mes,false);}
+        await waitIdle(); setStep(k,'done', await lastJobMsg());
+      }
     }
     setStep('rec','run'); await jpost('/api/reconcile'); await waitIdle(); setStep('rec','done', await lastJobMsg());
     setStep('cls','run'); const cl=await jpost('/api/cierre/cerrar?mes='+mes);
