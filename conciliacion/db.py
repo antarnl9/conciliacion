@@ -51,6 +51,8 @@ def connect() -> duckdb.DuckDBPyConnection:
         "ALTER TABLE reconciliacion ADD COLUMN IF NOT EXISTS extra DOUBLE",
         "ALTER TABLE reconciliacion ADD COLUMN IF NOT EXISTS recargos DOUBLE",
         "ALTER TABLE costos_tarifa ADD COLUMN IF NOT EXISTS servicio VARCHAR",
+        # Combustible por servicio (DHL: 'G'=Terrestre, 'N'=Next Day tienen pct distinto)
+        "ALTER TABLE combustible ADD COLUMN IF NOT EXISTS servicio VARCHAR",
     ):
         con.execute(ddl)
     return con

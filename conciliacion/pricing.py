@@ -33,8 +33,12 @@ def precio_sql(*, carrier: str, zona: str, kilo: str, fecha: str,
             f"AND {vig('ct.vigencia_desde','ct.vigencia_hasta')} "
             f"AND (COALESCE(ct.servicio,'')='' OR COALESCE(ct.servicio,'')={svc}) "
             f"ORDER BY (COALESCE(ct.servicio,'')={svc}) DESC, ct.peso_min LIMIT 1)")
+    # Combustible por (carrier, servicio, periodo). servicio vacío = aplica a cualquier
+    # servicio (fallback general). Mismo patrón que costos_tarifa: exacto > general.
     fuel = (f"COALESCE((SELECT cb.pct FROM combustible cb WHERE cb.carrier={carrier} "
-            f"AND {vig('cb.vigencia_desde','cb.vigencia_hasta')} ORDER BY cb.vigencia_desde DESC LIMIT 1),0)")
+            f"AND {vig('cb.vigencia_desde','cb.vigencia_hasta')} "
+            f"AND (COALESCE(cb.servicio,'')='' OR COALESCE(cb.servicio,'')={svc}) "
+            f"ORDER BY (COALESCE(cb.servicio,'')={svc}) DESC, cb.vigencia_desde DESC LIMIT 1),0)")
     mz = (f"COALESCE((SELECT mz.margen FROM margen_zona mz WHERE mz.seller_id={seller} AND mz.zona={zona} LIMIT 1),0)")
     mk = (f"COALESCE((SELECT mk.margen FROM margen_kilo mk WHERE mk.seller_id={seller} "
           f"AND {kilo} >= COALESCE(mk.peso_min,-1e12) AND {kilo} < COALESCE(mk.peso_max,1e12) "
